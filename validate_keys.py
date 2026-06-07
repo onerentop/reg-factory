@@ -12,15 +12,15 @@ if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
 
 from playwright.async_api import async_playwright
-from bitbrowser import BitBrowser
+from common.browser_provider import get_browser_provider, BrowserProvider
 
 INPUT_FILE = sys.argv[1] if len(sys.argv) > 1 else "cookies/accounts-3.24.txt"
 OUTPUT_VALID = INPUT_FILE.replace(".txt", "_valid.txt")
 OUTPUT_INVALID = INPUT_FILE.replace(".txt", "_invalid.txt")
 
 
-async def validate_key(sk: str, bb: BitBrowser) -> bool:
-    """用 BitBrowser 浏览器验证 sessionKey：打开 claude.ai，发一条消息，收到回复才算有效"""
+async def validate_key(sk: str, bb: BrowserProvider) -> bool:
+    """用 ixBrowser 浏览器验证 sessionKey：打开 claude.ai，发一条消息，收到回复才算有效"""
     name = f"validate_{datetime.now().strftime('%H%M%S')}"
     profile_id = None
     try:
@@ -132,7 +132,7 @@ async def main():
 
     print(f"Validating {len(lines)} keys from {INPUT_FILE}...")
 
-    bb = BitBrowser()
+    bb = get_browser_provider()
     valid = []
     invalid = []
 
