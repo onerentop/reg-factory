@@ -357,7 +357,7 @@ async def get_code_outlook_pw(
 ):
     """浏览器登录 Outlook 取 6 位验证码（refresh_token 失效时用）。
     通过点击左侧文件夹切换 inbox/junk（直接 goto junk URL 列表为空）。
-    page: BitBrowser 里新开的一个标签。返回 code 或 None。"""
+    page: ixBrowser 里新开的一个标签。返回 code 或 None。"""
     if os.environ.get("MAILBOX_BROKER"):
         return await fetch_from_broker(email, password, sender_hint, subject_hint, code_regex, "code", max_wait)
     if not await _outlook_login(page, email, password):

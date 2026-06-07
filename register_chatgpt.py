@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 ChatGPT (OpenAI) 自动注册
-复用 common/ 基建: BitBrowser + stealth + Outlook 取验证码 + cookie 保存
+复用 common/ 基建: ixBrowser + stealth + Outlook 取验证码 + cookie 保存
 
 流程: chatgpt.com/auth/login -> 填邮箱 -> Continue -> 验证码/密码 -> Arkose -> onboarding -> 保存 cookie
 

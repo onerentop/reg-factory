@@ -10,7 +10,7 @@ run_full_flow.py — 端到端全流程编排（含邮箱注册）
 Stage A 本身是个常驻循环，这里把它当子进程拉起、盯着 emails.txt，**一旦冒出
 一个新的可用号就立刻杀掉循环**进入 Stage B，所以是"注册到一个邮箱就往下走"。
 
-前置：BitBrowser(54345) 在线、Clash Verge(控制器 9097 / 混合端口 7897) 在线。
+前置：ixBrowser(53200) 在线、Clash Verge(控制器 9097 / 混合端口 7897) 在线。
 默认自动注入 HTTP(S)_PROXY 与 CLASH_API/SECRET/GROUP，让邮箱注册能换节点绕 MS 风控。
 
 用法：
@@ -79,7 +79,7 @@ def build_child_env(args):
     if args.proxy:
         env["HTTP_PROXY"] = env["HTTPS_PROXY"] = args.proxy
         env["http_proxy"] = env["https_proxy"] = args.proxy
-        # 关键：localhost API(BitBrowser 54345 / Clash 控制器 9097) 必须直连，
+        # 关键：localhost API(ixBrowser 53200 / Clash 控制器 9097) 必须直连，
         # 否则 urllib 把它们也塞进 7897 代理 -> 502 Bad Gateway。
         no_proxy = "127.0.0.1,localhost,::1"
         env["NO_PROXY"] = env["no_proxy"] = no_proxy

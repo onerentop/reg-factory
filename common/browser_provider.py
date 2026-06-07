@@ -2,7 +2,7 @@
 """
 common/browser_provider.py — 指纹浏览器窗口抽象契约 + 工厂。
 
-方法名与返回形状对齐历史 BitBrowser 封装，便于上层零改造迁移：
+方法名与返回形状对齐历史封装契约，便于上层零改造迁移：
     p = get_browser_provider()
     pid = p.create_browser(name="chatgpt_xxx")
     data = p.open_browser(pid)          # {"ws": ..., "http": ...}

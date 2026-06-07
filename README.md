@@ -29,7 +29,7 @@
 <p>
   <img src="https://img.shields.io/badge/Python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python" />
   <img src="https://img.shields.io/badge/Playwright-自动化-2EAD33?style=flat-square" alt="Playwright" />
-  <img src="https://img.shields.io/badge/BitBrowser-指纹隔离-5A4FCF?style=flat-square" alt="BitBrowser" />
+  <img src="https://img.shields.io/badge/ixBrowser-指纹隔离-5A4FCF?style=flat-square" alt="ixBrowser" />
   <img src="https://img.shields.io/badge/Clash%20Verge-节点切换-1F8FFF?style=flat-square" alt="Clash Verge" />
   <img src="https://img.shields.io/badge/license-educational-lightgrey?style=flat-square" alt="license" />
 </p>
@@ -40,7 +40,7 @@
 
 **reg-factory** 是一套全自动注册流水线：先自注册 **Outlook** 邮箱，再用同一邮箱在
 **ChatGPT / Grok / Claude** 上批量注册账号，并导出可直登的 cookie。底层用
-**比特浏览器(BitBrowser)** 做指纹隔离、**Clash Verge** 做节点切换绕区域封锁与 Cloudflare 风控、
+**ixBrowser** 做指纹隔离、**Clash Verge** 做节点切换绕区域封锁与 Cloudflare 风控、
 接码/打码平台过手机号与验证码。
 
 > 🔜 即将上新：**Gmail 注册机 → Google One 授权 → SUB2API / CPA 导入**完整链路。
@@ -51,8 +51,8 @@
 
 ## 1. 前置条件
 
-### ① 比特浏览器 BitBrowser
-- 安装并**启动**比特浏览器客户端，确保本地 API 在线（默认 `http://127.0.0.1:54345`）。
+### ① ixBrowser 指纹浏览器
+- 安装并**启动**ixBrowser客户端，确保本地 API 在线（默认 `http://127.0.0.1:53200`）。
 - 客户端要保持运行——脚本通过该 API 创建/打开/关闭浏览器窗口。
 
 ### ② Clash Verge（开启 API 权限）
@@ -100,7 +100,7 @@ cp .env.example .env
 | `CLASH_API` | Clash 控制面地址（默认 `http://127.0.0.1:9097`） | 否 |
 | `CLASH_PROXY` | Clash 混合端口代理（默认 `http://127.0.0.1:7897`） | 否 |
 | `CLASH_GROUP` | 切换出口的代理组名（默认 `GLOBAL`） | 否 |
-| `BITBROWSER_API` | 比特浏览器本地 API（默认 `http://127.0.0.1:54345`） | 否 |
+| `IXBROWSER_TARGET` / `IXBROWSER_PORT` | ixBrowser本地 API（默认 `http://127.0.0.1:53200`） | 否 |
 | `SMS_TOKEN` | 接码平台 firefox.fun 的 token | 需手机号时必填 |
 | `HERO_SMS_API_KEY` | 备用接码 hero-sms.com 的 api_key | 否 |
 | `CAPSOLVER_API_KEY` | CapSolver 打码 key | 按需 |
@@ -163,7 +163,7 @@ python export_accounts.py claude chatgpt       # 指定平台
 ```
 
 ### 批量解锁被锁的 Outlook 账号
-BitBrowser + Playwright,复用注册同款 PX 按压验证逻辑;按结果分类输出到
+ixBrowser + Playwright,复用注册同款 PX 按压验证逻辑;按结果分类输出到
 `unlock_results/`(`unlocked_*` 成功 / `needs_phone_*` 需短信 / `failed_*` 失败)。
 打码 key 走环境变量 `EZCAPTCHA_API_KEY`。
 ```bash
@@ -422,7 +422,7 @@ python export_chatgpt2api.py --json                                # 导出 {acc
 
 | 模块 | 职责 |
 |---|---|
-| `browser.py` | BitBrowser 连接、stealth、React 受控输入 |
+| `browser.py` | ixBrowser 连接、stealth、React 受控输入 |
 | `mailbox.py` / `emails.py` | 邮箱取码（Graph/浏览器）、邮箱池管理 |
 | `cookies.py` | 平台 cookie 保存 |
 | `sms.py` | 参数化接码客户端（firefox.fun + hero-sms 兜底） |
