@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Outlook Account Batch Unlock Script
-Uses BitBrowser + Playwright — reuses the same PX press-and-hold logic as registration.
+Uses ixBrowser + Playwright — reuses the same PX press-and-hold logic as registration.
 
 Usage:
   python unlock_outlook.py --input outlook_accounts/accounts_xxx.txt
@@ -37,7 +37,6 @@ import requests
 from playwright.async_api import async_playwright
 
 # ── Config ───────────────────────────────────────────────────────────
-BITBROWSER_API  = "http://127.0.0.1:54345"
 EZCAPTCHA_KEY   = _EZCAPTCHA_KEY
 EZCAPTCHA_BASE  = _EZCAPTCHA_BASE
 OUTPUT_DIR      = "unlock_results"
@@ -53,73 +52,35 @@ DEFAULT_PROXIES = [
 ]
 
 
-# ── BitBrowser ───────────────────────────────────────────────────────
-def _bb_post(path, data=None):
-    r = requests.post(f"{BITBROWSER_API}{path}", json=data or {}, timeout=120)
-    r.raise_for_status()
-    res = r.json()
-    if not res.get("success"):
-        raise Exception(f"BitBrowser: {res.get('msg', '?')}")
-    return res
+# ── 指纹浏览器（ixBrowser，经 common provider 统一接入） ───────────────
+from common.browser_provider import get_browser_provider
 
-def _parse_proxy(s):
-    if not s: return None
-    pt = "http"
-    for pfx in ["socks5://", "http://", "https://"]:
-        if s.lower().startswith(pfx):
-            pt = pfx.split("://")[0]; s = s[len(pfx):]
-    s = s.replace(",", "@", 1) if "@" not in s and "," in s else s
-    m = re.match(r'^(.+):(.+)@(.+):(\d+)$', s)
-    if m:
-        return {"type": pt, "username": m.group(1), "password": m.group(2),
-                "host": m.group(3), "port": m.group(4)}
-    m2 = re.match(r'^(.+):(\d+)$', s)
-    if m2:
-        return {"type": pt, "host": m2.group(1), "port": m2.group(2)}
-    return None
 
 def create_browser(name="unlock", proxy_str=None):
-    data = {"name": name, "remark": "outlook unlock",
-            "proxyMethod": 2, "browserFingerPrint": {"coreVersion": "130"}}
-    p = _parse_proxy(proxy_str)
-    if p:
-        data.update({"proxyType": p.get("type", "http"),
-                     "host": p["host"], "port": p["port"]})
-        if p.get("username"): data["proxyUserName"] = p["username"]
-        if p.get("password"): data["proxyPassword"] = p["password"]
-    else:
-        data["proxyType"] = "noproxy"
-    return _bb_post("/browser/update", data)["data"]["id"]
+    return get_browser_provider().create_browser(name=name, proxy_str=proxy_str)
 
 def open_browser(pid):
-    d = _bb_post("/browser/open", {"id": pid})["data"]
-    return d.get("ws") or d.get("webdriver")
+    # 返回 CDP endpoint（ws 优先，缺失时为 http 兜底地址）
+    return get_browser_provider().open_browser(pid).get("ws")
 
 def close_browser(pid):
-    try: _bb_post("/browser/close", {"id": pid})
-    except Exception: pass
+    get_browser_provider().close_browser(pid)
 
 def delete_browser(pid):
-    try: _bb_post("/browser/delete", {"id": pid})
-    except Exception: pass
+    get_browser_provider().delete_browser(pid)
 
 def cleanup_stale_browsers():
-    """启动时清理所有残留的 unlock/scan profile"""
+    """启动时清理残留的 unlock/scan profile（按名称前缀，不动其它窗口）"""
     try:
-        page, cleaned = 0, 0
-        while True:
-            r = _bb_post("/browser/list", {"page": page, "pageSize": 100})
-            items = r.get("data", {}).get("list", [])
-            if not items: break
-            for item in items:
-                name = item.get("name", "")
-                if any(name.startswith(p) for p in ["unlock_", "scan_", "quick_check"]):
-                    close_browser(item["id"])
-                    delete_browser(item["id"])
-                    cleaned += 1
-            total = r.get("data", {}).get("totalNum", 0)
-            page += 1
-            if page * 100 >= total: break
+        bb = get_browser_provider()
+        rows = bb.list_browsers(page=0, page_size=100)["data"]["list"]
+        cleaned = 0
+        for item in rows:
+            name = item.get("name", "")
+            if any(name.startswith(p) for p in ["unlock_", "scan_", "quick_check"]):
+                bb.close_browser(item["id"])
+                bb.delete_browser(item["id"])
+                cleaned += 1
         if cleaned:
             print(f"[startup] cleaned {cleaned} stale browser profiles")
     except Exception as e:
@@ -432,7 +393,7 @@ async def worker(accounts, proxy, worker_id, results, sem):
                 pid = create_browser(f"unlock_{worker_id}", proxy)
                 ws  = open_browser(pid)
                 if not ws:
-                    raise Exception("no WS url from BitBrowser")
+                    raise Exception("no WS url from ixBrowser")
 
                 async with async_playwright() as pw:
                     browser = await pw.chromium.connect_over_cdp(ws)
