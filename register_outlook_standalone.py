@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Standalone Outlook Email Registration Script
-Uses BitBrowser + Playwright + Proxy to register Outlook accounts
+Uses ixBrowser + Playwright + Proxy to register Outlook accounts
 Independent from the main register.py — only registers Outlook accounts
 
 Usage:
@@ -27,6 +27,8 @@ if sys.platform == "win32":
 
 import requests
 from playwright.async_api import async_playwright
+from common.browser_provider import get_browser_provider
+from common.ixbrowser_provider import IXBrowserProvider
 try:
     from playwright_stealth import Stealth as _StealthCls
     _HAS_STEALTH = True
@@ -48,8 +50,7 @@ try:
 except Exception:
     pass
 
-# BitBrowser local API
-BITBROWSER_API = os.environ.get("BITBROWSER_API", "http://127.0.0.1:54345")
+# ixBrowser local API
 
 # CAPTCHA solver keys（环境变量，默认空）
 CAPSOLVER_API_KEY = os.environ.get("CAPSOLVER_API_KEY", "")
@@ -95,141 +96,6 @@ def _load_default_proxies():
 
 DEFAULT_PROXIES = _load_default_proxies()
 
-
-# ======================== BitBrowser API ========================
-
-class BitBrowserClient:
-    """BitBrowser local API client with proxy support"""
-
-    def __init__(self, api_base=None):
-        self.api_base = api_base or BITBROWSER_API
-
-    def _post(self, path, data=None):
-        url = f"{self.api_base}{path}"
-        resp = requests.post(url, json=data or {}, timeout=120)
-        resp.raise_for_status()
-        result = resp.json()
-        if not result.get("success"):
-            raise Exception(f"BitBrowser API error: {result.get('msg', 'unknown')}")
-        return result
-
-    def create_browser(self, name="outlook_reg", proxy_str=None):
-        """Create a new browser profile with optional proxy.
-        proxy_str format: user:pass@host:port
-        """
-        data = {
-            "name": name,
-            "remark": "outlook standalone registration",
-            "proxyMethod": 2,  # custom proxy
-            "browserFingerPrint": {
-                "coreVersion": "130",
-            },
-        }
-
-        if proxy_str:
-            parsed = self._parse_proxy(proxy_str)
-            if parsed:
-                data["proxyType"] = parsed.get("type", "http")
-                data["host"] = parsed["host"]
-                data["port"] = parsed["port"]
-                if parsed.get("username"):
-                    data["proxyUserName"] = parsed["username"]
-                if parsed.get("password"):
-                    data["proxyPassword"] = parsed["password"]
-                print(f"  proxy: [{data['proxyType']}] {parsed['host']}:{parsed['port']} (user={parsed.get('username', 'none')[:20]}...)")
-            else:
-                data["proxyType"] = "noproxy"
-                print(f"  proxy: invalid format, using noproxy")
-        else:
-            data["proxyType"] = "noproxy"
-
-        result = self._post("/browser/update", data)
-        profile_id = result["data"]["id"]
-        print(f"  browser created: {name} (ID: {profile_id})")
-        return profile_id
-
-    def open_browser(self, profile_id):
-        """Open browser window, returns WebSocket debug URL"""
-        result = self._post("/browser/open", {"id": profile_id})
-        return result["data"]
-
-    def close_browser(self, profile_id):
-        """Close browser window"""
-        try:
-            self._post("/browser/close", {"id": profile_id})
-        except Exception:
-            pass
-
-    def delete_browser(self, profile_id):
-        """Delete browser profile"""
-        try:
-            self._post("/browser/delete", {"id": profile_id})
-        except Exception:
-            pass
-
-    def cleanup_browsers(self, keep=0):
-        """Delete all browser profiles (release quota)"""
-        result = self._post("/browser/list", {"page": 0, "pageSize": 200})
-        browsers = result["data"]["list"]
-        if not browsers:
-            return 0
-        browsers.sort(key=lambda b: b.get("seq", 0), reverse=True)
-        to_delete = browsers[keep:]
-        deleted = 0
-        for b in to_delete:
-            try:
-                self.close_browser(b["id"])
-            except Exception:
-                pass
-            time.sleep(1)
-            try:
-                self.delete_browser(b["id"])
-                deleted += 1
-            except Exception:
-                pass
-        print(f"  cleanup: deleted {deleted}/{len(to_delete)} browsers")
-        return deleted
-
-    @staticmethod
-    def _parse_proxy(proxy_str):
-        """Parse proxy string into dict.
-        Supported formats:
-          socks5://user:pass@host:port
-          socks5://host:port
-          user:pass@host:port          (defaults to http)
-          host:port                    (defaults to http)
-        """
-        # Strip protocol prefix
-        proxy_type = "http"
-        lower = proxy_str.lower()
-        if lower.startswith("socks5://"):
-            proxy_type = "socks5"
-            proxy_str = proxy_str[len("socks5://"):]
-        elif lower.startswith("http://"):
-            proxy_str = proxy_str[len("http://"):]
-        elif lower.startswith("https://"):
-            proxy_str = proxy_str[len("https://"):]
-
-        # Handle comma-separated format: user:pass,host:port
-        proxy_str = proxy_str.replace(",", "@", 1) if "@" not in proxy_str and "," in proxy_str else proxy_str
-
-        match = re.match(r'^(.+):(.+)@(.+):(\d+)$', proxy_str)
-        if match:
-            return {
-                "type": proxy_type,
-                "username": match.group(1),
-                "password": match.group(2),
-                "host": match.group(3),
-                "port": match.group(4),
-            }
-        match2 = re.match(r'^(.+):(\d+)$', proxy_str)
-        if match2:
-            return {
-                "type": proxy_type,
-                "host": match2.group(1),
-                "port": match2.group(2),
-            }
-        return None
 
 
 # ======================== Helper Functions ========================
@@ -610,7 +476,7 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False):
     Returns (email, password) on success, (None, None) on failure.
 
     captcha_early_abort: when True (headless mode), abort immediately after captcha
-    solvers fail so the caller can fall back faster. When False (browser/BitBrowser
+    solvers fail so the caller can fall back faster. When False (browser/ixBrowser
     mode), keep the loop running — PX presses sometimes pass after 10–30 s naturally.
     """
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
@@ -1371,12 +1237,12 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False):
                 # None of the solvers worked.
                 if captcha_early_abort:
                     # Headless mode: abort now so auto-mode can fall back to
-                    # BitBrowser without burning the full captcha timeout.
+                    # ixBrowser without burning the full captcha timeout.
                     arkose_solved = True
                     print(f"  {tag} captcha solvers unavailable — aborting early")
                     return None, None
                 else:
-                    # Browser/BitBrowser mode: reset counter so pressing continues.
+                    # Browser/ixBrowser mode: reset counter so pressing continues.
                     # max_press is already 15 for browser mode; just reset progress.
                     press_count = 0
                     print(f"  {tag} captcha solvers unavailable — retrying presses")
@@ -1428,7 +1294,7 @@ def _proxy_for_requests(proxy_str):
     """Convert proxy string to requests proxies dict."""
     if not proxy_str:
         return None
-    p = BitBrowserClient._parse_proxy(proxy_str)
+    p = IXBrowserProvider._parse_proxy(proxy_str)
     if not p:
         return None
     auth = f"{p['username']}:{p['password']}@" if p.get("username") else ""
@@ -1440,7 +1306,7 @@ def _proxy_for_playwright(proxy_str):
     """Convert proxy string to Playwright proxy dict."""
     if not proxy_str:
         return None
-    p = BitBrowserClient._parse_proxy(proxy_str)
+    p = IXBrowserProvider._parse_proxy(proxy_str)
     if not p:
         return None
     result = {"server": f"{p.get('type', 'http')}://{p['host']}:{p['port']}"}
@@ -1592,7 +1458,7 @@ def register_outlook_protocol(proxy_str=None, idx=0):
         return None, None
 
 
-# ======================== Headless Mode (Playwright, no BitBrowser) ========================
+# ======================== Headless Mode (Playwright, no ixBrowser) ========================
 
 # Headless: block everything heavy (CSS too, since rendering doesn't matter for detection)
 _BLOCK_TYPES_HEADLESS = {"image", "stylesheet", "font", "media", "other"}
@@ -1636,7 +1502,7 @@ async def _register_one_headless(idx, proxy_str):
     Register via truly headless Chrome (no window shown to user).
     Uses headless=True with comprehensive fingerprint patches to compensate
     for the missing headed-browser signals that PerimeterX checks.
-    Resource blocking saves ~70% bandwidth vs full BitBrowser.
+    Resource blocking saves ~70% bandwidth vs full ixBrowser.
     Returns (email, password) or (None, None).
     """
     tag = f"[#{idx}][headless]"
@@ -1764,7 +1630,7 @@ async def _register_one_headless(idx, proxy_str):
             # Block heavy resources to save bandwidth (headless doesn't need CSS for rendering)
             await page.route("**/*", _block_heavy_resources)
 
-            # Abort early when captcha solvers fail so auto-mode falls back to BitBrowser fast
+            # Abort early when captcha solvers fail so auto-mode falls back to ixBrowser fast
             email, password = await register_outlook(page, context, idx, captcha_early_abort=True)
 
             try:
@@ -1779,11 +1645,11 @@ async def _register_one_headless(idx, proxy_str):
         return None, None
 
 
-# ======================== Browser Mode (BitBrowser, full GUI) ========================
+# ======================== Browser Mode (ixBrowser, full GUI) ========================
 
 async def _register_one_browser(bb, idx, proxy_str):
     """
-    Register via BitBrowser full browser (highest traffic, most reliable).
+    Register via ixBrowser full browser (highest traffic, most reliable).
     Returns (email, password) or (None, None).
     """
     tag = f"[#{idx}][browser]"
@@ -1804,7 +1670,7 @@ async def _register_one_browser(bb, idx, proxy_str):
                     await asyncio.sleep(3)
                     continue
                 elif 'TLS' in err_msg or 'socket' in err_msg or 'ECONNRESET' in err_msg:
-                    print(f"  {tag} BitBrowser TLS error (retry {_retry + 1}/5)")
+                    print(f"  {tag} ixBrowser TLS error (retry {_retry + 1}/5)")
                     await asyncio.sleep(5 + _retry * 3)
                     continue
                 elif _retry < 4:
@@ -1824,7 +1690,7 @@ async def _register_one_browser(bb, idx, proxy_str):
             print(f"  {tag} no WebSocket URL")
             return None, None
 
-        print(f"  {tag} BitBrowser connected")
+        print(f"  {tag} ixBrowser connected")
         async with async_playwright() as p:
             browser = await p.chromium.connect_over_cdp(ws)
             context = browser.contexts[0] if browser.contexts else await browser.new_context()
@@ -1857,8 +1723,8 @@ async def register_one(bb, idx, proxy_str, results, results_lock, live_fh=None, 
     Register one Outlook account with fallback across three modes.
       mode="auto"     — protocol → headless → browser (fallback chain)
       mode="protocol" — HTTP only, fastest, lowest traffic
-      mode="headless" — headless Playwright, no BitBrowser, ~70% less traffic
-      mode="browser"  — BitBrowser full GUI, highest traffic, most reliable
+      mode="headless" — headless Playwright, no ixBrowser, ~70% less traffic
+      mode="browser"  — ixBrowser full GUI, highest traffic, most reliable
     """
     tag = f"[#{idx}]"
     email, password = None, None
@@ -1890,9 +1756,9 @@ async def register_one(bb, idx, proxy_str, results, results_lock, live_fh=None, 
             if email:
                 used_mode = "headless"
 
-        # ── 3. Browser mode (BitBrowser, full GUI) ───────────────
+        # ── 3. Browser mode (ixBrowser, full GUI) ───────────────
         if not email and mode in ("auto", "browser"):
-            print(f"  {tag} [3/3] browser mode (BitBrowser)...")
+            print(f"  {tag} [3/3] browser mode (ixBrowser)...")
             try:
                 email, password = await asyncio.wait_for(
                     _register_one_browser(bb, idx, proxy_str),
@@ -1970,14 +1836,14 @@ async def main():
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     os.makedirs(SCREENSHOT_DIR, exist_ok=True)
 
-    bb = BitBrowserClient()
+    bb = get_browser_provider()
 
     proxy_mode = "noproxy" if args.no_proxy else f"{len(proxy_pool)} unique proxies (cycling for {count} accounts)"
     mode_desc = {
         "auto":     "protocol → headless → browser (fallback chain)",
         "protocol": "protocol only (pure HTTP, lowest traffic)",
-        "headless": "headless only (no BitBrowser, -70% traffic)",
-        "browser":  "browser only (BitBrowser full GUI)",
+        "headless": "headless only (no ixBrowser, -70% traffic)",
+        "browser":  "browser only (ixBrowser full GUI)",
     }
     print("=" * 60)
     print("  Outlook Registration - Multi-mode")
