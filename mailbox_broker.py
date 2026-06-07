@@ -2,7 +2,7 @@
 """
 mailbox_broker.py — 共享取码服务（一号三用并行流水线的核心）
 
-单独一个常驻进程，对每个 outlook 邮箱**只登录一次** Outlook（noproxy BitBrowser），
+单独一个常驻进程，对每个 outlook 邮箱**只登录一次** Outlook（noproxy ixBrowser），
 轮询收件箱+垃圾箱，按发件人/正则把验证码(ChatGPT/Grok)或 magic-link(Claude)分发给
 并行运行的三个注册子进程 —— 从而避开"三个浏览器同时密码登录同一账号被微软判并发登录"。
 
@@ -12,7 +12,7 @@ mailbox_broker.py — 共享取码服务（一号三用并行流水线的核心�
 端点:
     POST /fetch    {email,password,sender_hint[],subject_hint[],regex,kind:"code"|"link",timeout}
                    -> {ok:bool, value:str|None, error?:str}
-    POST /release  {email}  -> 关闭并删除该号 BitBrowser 会话
+    POST /release  {email}  -> 关闭并删除该号 ixBrowser 会话
     GET  /health   -> {ok, sessions:[email...]}
 
 用法:
@@ -31,7 +31,7 @@ if sys.platform == "win32":
 from aiohttp import web
 from playwright.async_api import async_playwright
 
-from bitbrowser import BitBrowser
+from common.browser_provider import get_browser_provider
 from common.browser import inject_stealth, create_browser_with_retry
 from common.mailbox import _outlook_login, _click_folder, _scan_current_folder
 
@@ -108,7 +108,7 @@ class Session:
 
 class Broker:
     def __init__(self, idle_timeout=480):
-        self.bb = BitBrowser()
+        self.bb = get_browser_provider()
         self.pw = None
         self.p = None
         self.sessions = {}            # email -> Session
