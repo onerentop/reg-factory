@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-common/browser.py — BitBrowser 连接 + 反检测 stealth 注入（从 register.py 抽取，通用）
+common/browser.py — ixBrowser 连接 + 反检测 stealth 注入（从 register.py 抽取，通用）
 
 用法:
     from common.browser import open_and_connect, teardown, human_type
@@ -22,7 +22,7 @@ from playwright.async_api import async_playwright
 import os
 import sys as _sys
 _sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from bitbrowser import BitBrowser
+from common.browser_provider import get_browser_provider
 
 # 与 register.py 完全一致的反检测脚本
 STEALTH_JS = r"""
@@ -143,7 +143,7 @@ async def inject_stealth(context, page):
 
 
 def create_browser_with_retry(bb, name, retries=3):
-    """创建 BitBrowser 窗口，带配额满自动清理 / 网络错误重试"""
+    """创建 ixBrowser 窗口，带配额满自动清理 / 网络错误重试"""
     import time
     for attempt in range(retries):
         try:
@@ -163,14 +163,14 @@ def create_browser_with_retry(bb, name, retries=3):
 
 
 async def open_and_connect(name, p=None):
-    """创建并打开 BitBrowser 窗口，连接 Playwright 并注入 stealth。
+    """创建并打开 ixBrowser 窗口，连接 Playwright 并注入 stealth。
     返回 (bb, profile_id, browser, context, page)。
     注意：调用方需自行管理 async_playwright 生命周期，或传入 p。"""
-    bb = BitBrowser()
+    bb = get_browser_provider()
     pid = create_browser_with_retry(bb, name)
     if not pid:
         raise RuntimeError("create browser failed after retries")
-    # open 也可能遇到 BitBrowser TLS 抖动，多重试几次（BitBrowser API 不稳）
+    # open 也可能遇到 ixBrowser TLS 抖动，多重试几次（ixBrowser API 不稳）
     data = None
     max_open = 10
     for attempt in range(max_open):
