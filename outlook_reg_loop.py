@@ -1,5 +1,5 @@
 """Standalone Outlook registration loop. Continuously registers fresh
-outlook accounts via BitBrowser + standalone register_outlook script, and
+outlook accounts via ixBrowser + standalone register_outlook script, and
 writes each success to _data_bundle/_outlook_pool/ as one JSON file per
 record (email + password + session cookies).
 
@@ -142,52 +142,6 @@ def clash_proxy_from_env():
     return raw.rstrip("/") or None
 
 
-BB_API = "http://127.0.0.1:54345"
-# Match bs_register_step1 — user's BitBrowser has Chromium 146 not 130.
-BB_CORE_VERSION = os.environ.get("BB_CORE_VERSION", "146")
-
-
-def _bb_call(path, body):
-    data = json.dumps(body).encode()
-    req = urllib.request.Request(
-        f"{BB_API}{path}", data=data, method="POST",
-        headers={"Content-Type": "application/json"},
-    )
-    with urllib.request.urlopen(req, timeout=60) as r:
-        return json.loads(r.read())
-
-
-def bb_create_for_outlook_reg(name):
-    """Mirror bs_register_step1.bb_create_ephemeral so we share the working
-    fingerprint config (proxyType=noproxy + IP-derived locale; routes through
-    Clash via TUN). Standalone's hardcoded coreVersion=130 returns 502 on
-    BitBrowser builds that only have Chromium 146 installed."""
-    body = {
-        "name": name,
-        "remark": "outlook reg loop — auto-deleted after use",
-        "platform": "https://outlook.live.com",
-        "platformIcon": "outlook.live.com",
-        "proxyMethod": 2,
-        "proxyType": "noproxy",
-        "browserFingerPrint": {
-            "ostype": "PC",
-            "os": "Win32",
-            "coreVersion": BB_CORE_VERSION,
-            "isIpCreateTimeZone": True,
-            "isIpCreateLanguage": True,
-            "isIpCreateDisplayLanguage": True,
-            "isIpCreatePosition": True,
-            "isIpCountry": True,
-        },
-    }
-    r = _bb_call("/browser/update", body)
-    if not r.get("success"):
-        raise RuntimeError(f"/browser/update failed: {r}")
-    data = r.get("data") or {}
-    pid = data.get("id") or data.get("browserId")
-    if not pid:
-        raise RuntimeError(f"/browser/update returned no id: {data}")
-    return pid
 
 
 def count_pool():
@@ -257,14 +211,14 @@ async def one_attempt(mod, proxy_str, idx):
         for _r in range(5):
             try:
                 # Use our own create that picks coreVersion=146 (matches the
-                # BitBrowser install on this machine). Standalone's hardcoded
+                # ixBrowser install on this machine). Standalone's hardcoded
                 # 130 makes BB return 502.
-                profile_id = bb_create_for_outlook_reg(f"outlook_loop_{ts}_{idx}")
+                profile_id = bb.create_browser(name=f"outlook_loop_{ts}_{idx}")
                 break
             except Exception as e:
                 m = str(e)
                 if "最大" in m or "超过" in m:
-                    log("BitBrowser quota — cleanup_browsers(keep=2)", "WARN")
+                    log("ixBrowser quota — cleanup_browsers(keep=2)", "WARN")
                     try: bb.cleanup_browsers(keep=2)
                     except Exception: pass
                     await asyncio.sleep(3)
