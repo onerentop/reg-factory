@@ -28,6 +28,7 @@ import time
 import importlib.util
 import urllib.request
 from datetime import datetime
+from common.browser_provider import get_browser_provider
 
 if sys.platform == "win32":
     try:
@@ -250,7 +251,7 @@ async def one_attempt(mod, proxy_str, idx):
     flow, but doesn't carry the breaker state — we're a dedicated loop and
     want to keep trying."""
     profile_id = None
-    bb = mod.BitBrowserClient()
+    bb = get_browser_provider()
     try:
         ts = datetime.now().strftime("%m%d_%H%M%S")
         for _r in range(5):
