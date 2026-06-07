@@ -3,7 +3,7 @@
 Grok (x.ai) 自动注册
 关键: grok.com 有 Cloudflare 全页拦截，必须走 Clash 干净节点(换节点绕过)。
 
-流程: 切Clash节点 -> BitBrowser走代理 -> grok.com -> 新規登録 -> accounts.x.ai
+流程: 切Clash节点 -> ixBrowser走代理 -> grok.com -> 新規登録 -> accounts.x.ai
        -> メールで登録 -> 填邮箱 -> 邮件验证码(浏览器登录Outlook) -> 保存 cookie
 
 界面是日文(节点地区导致)，按钮文本用 日文+英文 双匹配。
@@ -28,7 +28,7 @@ from playwright.async_api import async_playwright
 
 import requests
 
-from bitbrowser import BitBrowser
+from common.browser_provider import get_browser_provider
 from common.browser import inject_stealth, create_browser_with_retry, human_type
 from common.mailbox import get_code_outlook_pw
 from common.cookies import save_platform_cookies
@@ -443,7 +443,7 @@ async def dump_state(page, tag=""):
 
 
 async def get_code_via_direct_browser(email, email_pw, p):
-    """单开一个 noproxy BitBrowser 窗口(本机直连)登录 Outlook 取验证码。
+    """单开一个 noproxy ixBrowser 窗口(本机直连)登录 Outlook 取验证码。
     注册浏览器走代理过 Grok CF，但 Outlook 界面走代理刷不出，故取信用直连。"""
     import os
     if os.environ.get("MAILBOX_BROKER"):
@@ -454,7 +454,7 @@ async def get_code_via_direct_browser(email, email_pw, p):
             r"\b((?=[A-Z0-9-]*[A-Z])[A-Z0-9]{2,4}-[A-Z0-9]{2,4})\b", "code",
             int(os.environ.get("GROK_BROKER_TIMEOUT", "40")),
         )
-    bb = BitBrowser()
+    bb = get_browser_provider()
     pid = None
     try:
         pid = create_browser_with_retry(bb, f"mail_{time.strftime('%H%M%S')}")
@@ -517,11 +517,11 @@ async def register_one(index, total, p, node):
     print(f"\n#{index}/{total} email={email}")
 
     name = f"grok_{time.strftime('%m%d_%H%M%S')}_{index}"
-    bb = BitBrowser()
+    bb = get_browser_provider()
     pid = None
     success = False
     try:
-        # BitBrowser 走 Clash 代理
+        # ixBrowser 走 Clash 代理
         pid = create_browser_with_retry(
             bb, name,
         )
@@ -666,7 +666,7 @@ async def register_one(index, total, p, node):
 
         # Step 5: 邮件验证码
         # 关键架构：注册浏览器走代理(过Grok CF)，但 Outlook 界面走代理刷不出来，
-        # 所以取信单开一个 noproxy 的 BitBrowser 窗口(本机直连)读邮件。
+        # 所以取信单开一个 noproxy 的 ixBrowser 窗口(本机直连)读邮件。
         print("  [5] get verification code via separate noproxy Outlook window")
         code = await get_code_via_direct_browser(email, email_pw, p)
 
