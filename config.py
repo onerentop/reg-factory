@@ -41,8 +41,9 @@ def _env(name, default=""):
 
 
 # ---------------------------------------------------------------- 本地基建
-# BitBrowser 本地 API 地址
-BITBROWSER_API = _env("BITBROWSER_API", "http://127.0.0.1:54345")
+# ixBrowser 本地 API（IXBrowserClient 默认 127.0.0.1:53200）
+IXBROWSER_TARGET = _env("IXBROWSER_TARGET", "127.0.0.1")
+IXBROWSER_PORT = int(_env("IXBROWSER_PORT", "53200"))
 
 # Claude.ai 注册相关 URL
 CLAUDE_LOGIN_URL = "https://claude.ai/login"
