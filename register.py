@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Claude.ai auto registration script
-BitBrowser + Playwright + Mail API + SMS API
+ixBrowser + Playwright + Mail API + SMS API
 Full auto: create email -> register -> magic link -> form -> phone verify -> extract cookie
 Usage: python register.py [--count N]
 """
@@ -24,7 +24,7 @@ if sys.platform == "win32":
 import requests
 from playwright.async_api import async_playwright
 
-from bitbrowser import BitBrowser
+from common.browser_provider import get_browser_provider
 try:
     from common import proxy_switch
 except Exception:
@@ -149,10 +149,10 @@ def validate_session_key(session_key: str) -> bool:
 
 
 async def validate_session_key_with_page(page, session_key: str) -> bool:
-    """用全新的 BitBrowser 窗口验证 sessionKey 是否独立可用。
+    """用全新的 ixBrowser 窗口验证 sessionKey 是否独立可用。
     开新窗口 → 设 sessionKey cookie → 打开 claude.ai → 检查是否登录成功 → 发消息收到回复。
     """
-    bb = BitBrowser()
+    bb = get_browser_provider()
     profile_id = None
     try:
         name = f"validate_{datetime.now().strftime('%H%M%S')}"
@@ -1650,7 +1650,7 @@ def get_magic_link_by_token(email, refresh_token, client_id="9e5f94bc-e8a4-4e73-
     return None
 
 
-# ---- 多语言按钮匹配（BitBrowser 节点地区不同，Claude 登录界面语言可能是 英/日/中/繁/韩/西/法/德）----
+# ---- 多语言按钮匹配（ixBrowser 节点地区不同，Claude 登录界面语言可能是 英/日/中/繁/韩/西/法/德）----
 CONTINUE_EMAIL_LABELS = [
     # 具体"用邮箱继续"优先，避免误点 Continue with Google/Apple
     "Continue with email", "Continue with Email",
@@ -3217,7 +3217,7 @@ async def _get_and_verify_phone(page, max_attempts=2):
 
 async def register(profile_id, email="", email_password="", email_token=""):
     """Run one registration. Returns sessionKey on success, None on failure."""
-    bb = BitBrowser()
+    bb = get_browser_provider()
     start_time = time.time()
 
     def check_timeout():
@@ -3225,7 +3225,7 @@ async def register(profile_id, email="", email_password="", email_token=""):
         if elapsed > REGISTER_TIMEOUT:
             raise TimeoutError(f"registration timeout ({REGISTER_TIMEOUT}s)")
 
-    print(f"\n[1/6] open BitBrowser...")
+    print(f"\n[1/6] open ixBrowser...")
     browser_data = bb.open_browser(profile_id)
     ws_url = browser_data["ws"]
     print(f"  ws: {ws_url}")
@@ -3944,7 +3944,7 @@ async def main():
             print(f"  failed to load emails: {e}")
             return
 
-    bb = BitBrowser()
+    bb = get_browser_provider()
     results = []
     results_lock = asyncio.Lock()
     sem = asyncio.Semaphore(args.concurrency)
