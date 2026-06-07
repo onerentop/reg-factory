@@ -17,7 +17,7 @@ if sys.platform == "win32":
 from ixbrowser_local_api import IXBrowserClient
 from ixbrowser_local_api.entities import Profile, Proxy, Fingerprint
 
-from config import IXBROWSER_TARGET, IXBROWSER_PORT
+from config import IXBROWSER_TARGET, IXBROWSER_PORT, IXBROWSER_KERNEL_VERSION
 from common.browser_provider import BrowserProvider
 
 _RETRYABLE = [
@@ -118,7 +118,10 @@ class IXBrowserProvider(BrowserProvider):
         fp = Fingerprint()
         fp.ua_type = 1            # PC
         fp.platform = "Windows"
-        fp.kernel_version = "130"
+        # 内核版本：默认不指定，交给 ixBrowser 用客户端已下载的默认内核（自动适配本机）。
+        # 仅当显式配置 IXBROWSER_KERNEL_VERSION 时才强制（需该版本已在客户端下载）。
+        if IXBROWSER_KERNEL_VERSION:
+            fp.kernel_version = IXBROWSER_KERNEL_VERSION
         fp.hardware_concurrency = 8   # 与 STEALTH_JS 伪造值一致
         fp.device_memory = 8
         return fp

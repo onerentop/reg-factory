@@ -44,6 +44,9 @@ def _env(name, default=""):
 # ixBrowser 本地 API（IXBrowserClient 默认 127.0.0.1:53200）
 IXBROWSER_TARGET = _env("IXBROWSER_TARGET", "127.0.0.1")
 IXBROWSER_PORT = int(_env("IXBROWSER_PORT", "53200"))
+# 指定窗口内核版本；留空=用 ixBrowser 客户端默认内核（推荐，自动适配本机已下载的内核）。
+# 若客户端未下载某版本会报"需要使用 XXX 内核才可以打开"，此时填一个已下载的版本号即可。
+IXBROWSER_KERNEL_VERSION = _env("IXBROWSER_KERNEL_VERSION", "")
 
 # Claude.ai 注册相关 URL
 CLAUDE_LOGIN_URL = "https://claude.ai/login"

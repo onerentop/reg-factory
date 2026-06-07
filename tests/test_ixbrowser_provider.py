@@ -39,13 +39,14 @@ def test_parse_proxy_invalid_returns_none():
     assert IXBrowserProvider._parse_proxy("garbage") is None
 
 
-def test_create_browser_sets_kernel_130_and_returns_id():
+def test_create_browser_default_kernel_unforced_and_returns_id():
+    # 默认不强制内核版本（交给 ixBrowser 客户端默认内核，自动适配本机）
     p, fake = _provider_with_fake_client()
     fake.create_profile.return_value = {"profile_id": 123}
     pid = p.create_browser(name="t")
     assert pid == 123
     profile = fake.create_profile.call_args[0][0]
-    assert profile.fingerprint_config.kernel_version == "130"
+    assert profile.fingerprint_config.kernel_version is None
 
 
 def test_create_browser_with_proxy_sets_custom_mode():
