@@ -27,6 +27,13 @@ class LegacyBridge:
     def ensure_importable(self) -> None:
         if self._root not in sys.path:
             sys.path.insert(0, self._root)
+        self._patch_stdin()
+
+    @staticmethod
+    def _patch_stdin() -> None:
+        """旧脚本顶层有 sys.stdin.reconfigure()，pytest 的 stdin 不支持。"""
+        if not hasattr(sys.stdin, "reconfigure"):
+            sys.stdin = open(os.devnull, "r")
 
     def get_config(self, key: str, default: str = "") -> str:
         self.ensure_importable()

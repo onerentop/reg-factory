@@ -1,7 +1,14 @@
+"""注册流程步骤引擎。模板方法模式 + LegacyBridge 适配现有脚本。"""
+
 import time
+import asyncio
+import random
+import string
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
+
+from worker.legacy_bridge import LegacyBridge
 
 
 @dataclass
@@ -11,11 +18,15 @@ class StepResult:
     success: bool
     error: str | None = None
     duration_ms: int = 0
-    data: dict[str, Any] | None = None
+    data: dict[str, Any] = field(default_factory=dict)
 
 
 class RegistrationFlow(ABC):
     """注册流程抽象基类。模板方法——定义步骤执行的骨架算法。"""
+
+    def __init__(self):
+        self._bridge = LegacyBridge()
+        self._bridge.ensure_importable()
 
     @abstractmethod
     def get_steps(self) -> list[str]:
@@ -50,100 +61,233 @@ class RegistrationFlow(ABC):
 
 
 class OutlookRegistrationFlow(RegistrationFlow):
-    """Outlook 注册流程。"""
+    """Outlook 浏览器注册流程。通过 LegacyBridge 调用 register_outlook_standalone.py。"""
 
     def get_steps(self) -> list[str]:
         return [
-            "Create email",
-            "Set password",
-            "Fill birthday",
-            "Solve captcha",
-            "Complete registration",
+            "Generate credentials",
+            "Browser registration",
+            "Extract Graph Token",
+            "Save and cleanup",
         ]
 
     async def execute_step(self, step_number: int, step_name: str, context: dict) -> StepResult:
-        """Outlook 注册步骤执行。实际浏览器操作在此实现。"""
-        email = context.get("email", "")
 
-        if step_name == "Create email":
-            # TODO: 接入 Playwright 填写邮箱表单
-            return StepResult(step_number=step_number, name=step_name, success=True,
-                            data={"email": email})
+        if step_name == "Generate credentials":
+            from register_outlook_standalone import generate_email_password, generate_birthday, generate_name
+            email, password, _prefix = generate_email_password()
+            first, last = generate_name()
+            birthday = generate_birthday()
+            context["email"] = email
+            context["password"] = password
+            context["first_name"] = first
+            context["last_name"] = last
+            context["birthday"] = birthday
+            return StepResult(
+                step_number=step_number, name=step_name, success=True,
+                data={"email": email, "first_name": first, "last_name": last},
+            )
 
-        elif step_name == "Set password":
-            # TODO: 接入 Playwright 设置密码
-            return StepResult(step_number=step_number, name=step_name, success=True)
+        elif step_name == "Browser registration":
+            from common.browser import open_and_connect
+            from register_outlook_standalone import register_outlook
+            from playwright.async_api import async_playwright
 
-        elif step_name == "Fill birthday":
-            # TODO: 接入 Playwright 填写生日
-            return StepResult(step_number=step_number, name=step_name, success=True)
+            proxy_str = context.get("proxy")
+            idx = context.get("idx", 0)
 
-        elif step_name == "Solve captcha":
-            # TODO: 接入 Arkose Labs 验证码处理
-            return StepResult(step_number=step_number, name=step_name, success=True)
+            async with async_playwright() as p:
+                bb, pid, browser, ctx, page = await open_and_connect(
+                    name=f"outlook_{context.get('email', 'unknown')}", p=p,
+                )
+                context["_bb"] = bb
+                context["_pid"] = pid
+                context["_browser"] = browser
+                context["_context"] = ctx
+                context["_page"] = page
 
-        elif step_name == "Complete registration":
-            # TODO: 提取 Cookie/Token 并保存
-            return StepResult(step_number=step_number, name=step_name, success=True,
-                            data={"status": "registered"})
+                result = await register_outlook(page, ctx, idx=idx)
+                if isinstance(result, tuple):
+                    reg_email, reg_password = result
+                    if reg_email:
+                        context["email"] = reg_email
+                        context["password"] = reg_password
+                        return StepResult(
+                            step_number=step_number, name=step_name, success=True,
+                            data={"email": reg_email},
+                        )
 
-        return StepResult(step_number=step_number, name=step_name, success=False,
-                         error=f"Unknown step: {step_name}")
+                return StepResult(
+                    step_number=step_number, name=step_name, success=False,
+                    error="Registration failed",
+                )
+
+        elif step_name == "Extract Graph Token":
+            page = context.get("_page")
+            ctx = context.get("_context")
+            email = context.get("email", "")
+            password = context.get("password", "")
+
+            if not page or not ctx:
+                return StepResult(
+                    step_number=step_number, name=step_name, success=False,
+                    error="No browser session available",
+                )
+
+            from register_outlook_standalone import extract_graph_token
+            token = await extract_graph_token(page, ctx, email, password)
+            if token:
+                context["refresh_token"] = token
+                return StepResult(
+                    step_number=step_number, name=step_name, success=True,
+                    data={"has_token": True},
+                )
+            return StepResult(
+                step_number=step_number, name=step_name, success=True,
+                data={"has_token": False, "note": "Token extraction skipped or failed"},
+            )
+
+        elif step_name == "Save and cleanup":
+            bb = context.pop("_bb", None)
+            pid = context.pop("_pid", None)
+            context.pop("_browser", None)
+            context.pop("_context", None)
+            context.pop("_page", None)
+
+            if bb and pid:
+                from common.browser import teardown
+                await teardown(bb, pid, delete=True)
+
+            return StepResult(
+                step_number=step_number, name=step_name, success=True,
+                data={
+                    "email": context.get("email"),
+                    "password": context.get("password"),
+                    "refresh_token": context.get("refresh_token"),
+                },
+            )
+
+        return StepResult(
+            step_number=step_number, name=step_name, success=False,
+            error=f"Unknown step: {step_name}",
+        )
 
 
 class GmailRegistrationFlow(RegistrationFlow):
-    """Gmail 注册流程。"""
+    """Gmail 混合方案注册流程。通过 LegacyBridge 调用 register_gmail_hybrid.py。
+
+    浏览器铸 BotGuard token（姓名→生日→用户名→密码）+ 浏览器手机验证。
+    """
 
     def get_steps(self) -> list[str]:
         return [
-            "Fill name",
-            "Set birthday",
-            "Choose username",
-            "Set password",
+            "Generate profile",
+            "Browser drive to phone",
             "Phone verification",
-            "Accept terms",
-            "Complete registration",
+            "Save and cleanup",
         ]
 
     async def execute_step(self, step_number: int, step_name: str, context: dict) -> StepResult:
-        """Gmail 注册步骤执行。混合方案：浏览器铸 BotGuard + HTTP 手机验证。"""
-        email = context.get("email", "")
 
-        if step_name == "Fill name":
-            # TODO: 接入 Playwright 或 HTTP batchexecute 填写姓名
-            return StepResult(step_number=step_number, name=step_name, success=True)
+        if step_name == "Generate profile":
+            first = ''.join(random.choices(string.ascii_lowercase, k=random.randint(5, 8))).capitalize()
+            last = ''.join(random.choices(string.ascii_lowercase, k=random.randint(5, 8))).capitalize()
+            password = f"Gm{''.join(random.choices(string.ascii_letters + string.digits, k=6))}!{random.randint(10, 99)}"
 
-        elif step_name == "Set birthday":
-            # TODO: BotGuard token 铸造 + 填写生日
-            return StepResult(step_number=step_number, name=step_name, success=True)
+            context["profile"] = {
+                "first": first, "last": last, "pw": password,
+                "year": random.randint(1988, 1998),
+                "month": random.randint(1, 12),
+                "day": random.randint(1, 28),
+            }
+            return StepResult(
+                step_number=step_number, name=step_name, success=True,
+                data={"first": first, "last": last},
+            )
 
-        elif step_name == "Choose username":
-            # TODO: 用户名可用性检查 + 填写
-            return StepResult(step_number=step_number, name=step_name, success=True,
-                            data={"username": email.split("@")[0] if email else ""})
+        elif step_name == "Browser drive to phone":
+            from common.browser import open_and_connect
+            from register_gmail_hybrid import drive_to_phone, build_signup_url
+            from playwright.async_api import async_playwright
 
-        elif step_name == "Set password":
-            # TODO: 设置密码
-            return StepResult(step_number=step_number, name=step_name, success=True)
+            async with async_playwright() as p:
+                bb, pid, browser, ctx, page = await open_and_connect(
+                    name=f"gmail_{context.get('profile', {}).get('first', 'unknown')}", p=p,
+                )
+                context["_bb"] = bb
+                context["_pid"] = pid
+                context["_page"] = page
+                context["_context"] = ctx
+
+                signup_url = build_signup_url()
+                await page.goto(signup_url, timeout=60000, wait_until="domcontentloaded")
+                await asyncio.sleep(3)
+
+                profile = context.get("profile", {})
+                success = await drive_to_phone(page, profile)
+                context["profile"] = profile
+
+                if success:
+                    return StepResult(
+                        step_number=step_number, name=step_name, success=True,
+                        data={"username": profile.get("username", "")},
+                    )
+                return StepResult(
+                    step_number=step_number, name=step_name, success=False,
+                    error="Failed to drive to phone verification page",
+                )
 
         elif step_name == "Phone verification":
-            # TODO: 调用 SMS Service 获取号码 + 轮询验证码
-            # sms_response = await http_client.post(SMS_SERVICE_URL + "/sms/number/acquire", ...)
-            # code = await http_client.get(SMS_SERVICE_URL + f"/sms/number/{order_id}/code", ...)
-            return StepResult(step_number=step_number, name=step_name, success=True,
-                            data={"phone_verified": True})
+            page = context.get("_page")
+            ctx = context.get("_context")
+            profile = context.get("profile", {})
 
-        elif step_name == "Accept terms":
-            # TODO: 接受服务条款
-            return StepResult(step_number=step_number, name=step_name, success=True)
+            if not page:
+                return StepResult(
+                    step_number=step_number, name=step_name, success=False,
+                    error="No browser session available",
+                )
 
-        elif step_name == "Complete registration":
-            # TODO: 完成注册 + 保存 Cookie
-            return StepResult(step_number=step_number, name=step_name, success=True,
-                            data={"status": "registered"})
+            from register_gmail_hybrid import browser_phone_and_finalize
+            pid = context.get("_pid")
+            result = await browser_phone_and_finalize(page, profile, ctx=ctx, profile_id=pid)
 
-        return StepResult(step_number=step_number, name=step_name, success=False,
-                         error=f"Unknown step: {step_name}")
+            if result and result.get("email"):
+                context["email"] = result["email"]
+                context["password"] = profile.get("pw", "")
+                context["result"] = result
+                return StepResult(
+                    step_number=step_number, name=step_name, success=True,
+                    data={"email": result["email"]},
+                )
+            return StepResult(
+                step_number=step_number, name=step_name, success=False,
+                error=f"Phone verification failed: {result}",
+            )
+
+        elif step_name == "Save and cleanup":
+            bb = context.pop("_bb", None)
+            pid = context.pop("_pid", None)
+            context.pop("_page", None)
+            context.pop("_context", None)
+
+            if bb and pid:
+                from common.browser import teardown
+                await teardown(bb, pid, delete=True)
+
+            return StepResult(
+                step_number=step_number, name=step_name, success=True,
+                data={
+                    "email": context.get("email"),
+                    "password": context.get("password"),
+                    "username": context.get("profile", {}).get("username"),
+                },
+            )
+
+        return StepResult(
+            step_number=step_number, name=step_name, success=False,
+            error=f"Unknown step: {step_name}",
+        )
 
 
 class FlowRegistry:
