@@ -66,15 +66,25 @@ export default function ProxyPage() {
     } catch { message.error('更新失败') }
   }
 
-  const testProxy = (id: string) => {
-    setProxies(proxies.map(p =>
-      p.id === id ? { ...p, status: 'testing' } : p
-    ))
-    setTimeout(() => {
+  const testProxy = async (id: string) => {
+    setProxies(prev => prev.map(p => p.id === id ? { ...p, status: 'testing' } : p))
+    try {
+      const resp = await fetch(`/api/proxy/${id}/test`, { method: 'POST' })
+      const data = await resp.json()
+      const newStatus = data.data?.status || 'unavailable'
+      const testResult = data.data?.result || 'unavailable'
       setProxies(prev => prev.map(p =>
-        p.id === id ? { ...p, status: Math.random() > 0.3 ? 'active' : 'unavailable', active: Math.random() > 0.3 } : p
+        p.id === id ? { ...p, status: newStatus, active: newStatus === 'active' } : p
       ))
-    }, 1500)
+      if (testResult === 'available' || testResult === 'slow') {
+        message.success(`代理可用${testResult === 'slow' ? '（较慢）' : ''}`)
+      } else {
+        message.error('代理不可用')
+      }
+    } catch {
+      setProxies(prev => prev.map(p => p.id === id ? { ...p, status: 'unavailable' } : p))
+      message.error('测试失败')
+    }
   }
 
   const testAll = () => { proxies.forEach(p => testProxy(p.id)) }

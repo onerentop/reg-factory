@@ -298,6 +298,28 @@ async def delete_proxy(proxy_id: str, session: AsyncSession = Depends(get_sessio
     return ApiResponse(message="Deleted")
 
 
+@app.post("/proxy/{proxy_id}/test", response_model=ApiResponse)
+async def test_proxy(proxy_id: str, session: AsyncSession = Depends(get_session)):
+    """真实检测代理连通性。"""
+    import uuid
+    from sqlalchemy import select
+    stmt = select(ProxyEntry).where(ProxyEntry.id == uuid.UUID(proxy_id))
+    result = await session.execute(stmt)
+    proxy = result.scalar_one_or_none()
+    if proxy is None:
+        raise HTTPException(status_code=404, detail="Proxy not found")
+
+    from gateway.proxy_manager import check_proxy_health
+    ptype = proxy.type or "socks5"
+    status = await check_proxy_health(proxy.host, int(proxy.port), ptype,
+                                       username=proxy.username, password=proxy.password)
+    proxy.status = status if status != "unavailable" else "unavailable"
+    if status in ("available", "slow"):
+        proxy.status = "active"
+    await session.flush()
+    return ApiResponse(data={"id": str(proxy.id), "status": proxy.status, "result": status})
+
+
 @app.put("/proxy/{proxy_id}/status", response_model=ApiResponse)
 async def update_proxy_status(proxy_id: str, body: dict, session: AsyncSession = Depends(get_session)):
     import uuid

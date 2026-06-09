@@ -76,15 +76,23 @@ ALLOCATOR_MAP: dict[str, type[ProxyAllocator]] = {
 }
 
 
-async def check_proxy_health(host: str, port: int, proxy_type: str = "socks5", timeout: float = 5.0) -> str:
+async def check_proxy_health(host: str, port: int, proxy_type: str = "socks5", timeout: float = 10.0, username: str = None, password: str = None) -> str:
     """检测单个代理的健康状态。返回 available / slow / unavailable。"""
-    proxy_url = f"{proxy_type}://{host}:{port}"
+    if username and password:
+        proxy_url = f"{proxy_type}://{username}:{password}@{host}:{port}"
+    else:
+        proxy_url = f"{proxy_type}://{host}:{port}"
+    test_urls = ["https://www.google.com/generate_204", "https://cp.cloudflare.com", "https://httpbin.org/ip"]
     try:
-        async with httpx.AsyncClient(proxy=proxy_url, timeout=timeout) as client:
-            resp = await client.get("https://httpbin.org/ip")
-            if resp.status_code == 200:
-                elapsed = resp.elapsed.total_seconds() if hasattr(resp, 'elapsed') else 0
-                return "slow" if elapsed > 3 else "available"
+        async with httpx.AsyncClient(proxy=proxy_url, timeout=timeout, follow_redirects=True) as client:
+            for url in test_urls:
+                try:
+                    resp = await client.get(url)
+                    if resp.status_code < 400:
+                        elapsed = resp.elapsed.total_seconds() if hasattr(resp, 'elapsed') else 0
+                        return "slow" if elapsed > 3 else "available"
+                except Exception:
+                    continue
     except Exception as e:
         logger.debug(f"Proxy {host}:{port} check failed: {e}")
     return "unavailable"
