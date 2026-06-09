@@ -45,7 +45,6 @@ async def health():
 # Import providers to trigger @register decorators
 import sms_service.providers  # noqa: F401, E402
 
-from sms_service.router import router  # noqa: E402
 from sms_service.service import SmsService  # noqa: E402
 from sms_service.repository import SmsOrderRepository, SmsPlatformConfigRepository  # noqa: E402
 from shared.base_schema import ApiResponse  # noqa: E402
