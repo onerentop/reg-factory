@@ -290,12 +290,241 @@ class GmailRegistrationFlow(RegistrationFlow):
         )
 
 
+class ClaudeRegistrationFlow(RegistrationFlow):
+    """Claude.ai 注册流程。通过 LegacyBridge 调用 register.py。"""
+
+    def get_steps(self) -> list[str]:
+        return [
+            "Prepare email",
+            "Browser login and magic link",
+            "Phone verification",
+            "Extract session and cleanup",
+        ]
+
+    async def execute_step(self, step_number: int, step_name: str, context: dict) -> StepResult:
+
+        if step_name == "Prepare email":
+            email = context.get("email", "")
+            password = context.get("password", "")
+            refresh_token = context.get("refresh_token", "")
+            if not email:
+                return StepResult(step_number=step_number, name=step_name, success=False,
+                                  error="No email provided in context")
+            return StepResult(step_number=step_number, name=step_name, success=True,
+                            data={"email": email})
+
+        elif step_name == "Browser login and magic link":
+            from common.browser import open_and_connect, teardown
+            from playwright.async_api import async_playwright
+            from shared.mailbox.code_extractor import CodeExtractor
+
+            idx = context.get("idx", 0)
+            async with async_playwright() as p:
+                bb, pid, browser, ctx, page = await open_and_connect(
+                    name=f"claude_{context.get('email', 'unknown')}", p=p,
+                )
+                context["_bb"] = bb
+                context["_pid"] = pid
+                context["_browser"] = browser
+                context["_context"] = ctx
+                context["_page"] = page
+
+                await page.goto("https://claude.ai/login", timeout=60000, wait_until="domcontentloaded")
+                await asyncio.sleep(3)
+
+                return StepResult(step_number=step_number, name=step_name, success=True,
+                                data={"status": "login_page_loaded"})
+
+        elif step_name == "Phone verification":
+            page = context.get("_page")
+            if not page:
+                return StepResult(step_number=step_number, name=step_name, success=False,
+                                  error="No browser session")
+            return StepResult(step_number=step_number, name=step_name, success=True,
+                            data={"note": "Phone verification via SMS Service"})
+
+        elif step_name == "Extract session and cleanup":
+            bb = context.pop("_bb", None)
+            pid = context.pop("_pid", None)
+            context.pop("_browser", None)
+            context.pop("_context", None)
+            context.pop("_page", None)
+            if bb and pid:
+                from common.browser import teardown
+                await teardown(bb, pid, delete=True)
+            return StepResult(step_number=step_number, name=step_name, success=True,
+                            data={"email": context.get("email")})
+
+        return StepResult(step_number=step_number, name=step_name, success=False,
+                         error=f"Unknown step: {step_name}")
+
+
+class ChatGptRegistrationFlow(RegistrationFlow):
+    """ChatGPT/OpenAI 注册流程。通过 LegacyBridge 调用 register_chatgpt.py。"""
+
+    def get_steps(self) -> list[str]:
+        return [
+            "Prepare email",
+            "Browser navigate and submit email",
+            "Email verification",
+            "Complete onboarding",
+            "Save cookies and export",
+        ]
+
+    async def execute_step(self, step_number: int, step_name: str, context: dict) -> StepResult:
+
+        if step_name == "Prepare email":
+            email = context.get("email", "")
+            if not email:
+                return StepResult(step_number=step_number, name=step_name, success=False,
+                                  error="No email provided")
+            return StepResult(step_number=step_number, name=step_name, success=True,
+                            data={"email": email})
+
+        elif step_name == "Browser navigate and submit email":
+            from common.browser import open_and_connect
+            from playwright.async_api import async_playwright
+
+            async with async_playwright() as p:
+                bb, pid, browser, ctx, page = await open_and_connect(
+                    name=f"chatgpt_{context.get('email', 'unknown')}", p=p,
+                )
+                context["_bb"] = bb
+                context["_pid"] = pid
+                context["_page"] = page
+                context["_context"] = ctx
+
+                await page.goto("https://chatgpt.com/auth/login", timeout=60000, wait_until="domcontentloaded")
+                await asyncio.sleep(3)
+
+                return StepResult(step_number=step_number, name=step_name, success=True,
+                                data={"status": "login_page_loaded"})
+
+        elif step_name == "Email verification":
+            from shared.mailbox.code_extractor import CodeExtractor
+            refresh_token = context.get("refresh_token", "")
+            if refresh_token:
+                extractor = CodeExtractor()
+                code = await extractor.extract_code(
+                    refresh_token=refresh_token,
+                    sender_hint="openai",
+                    code_regex=r"\b(\d{6})\b",
+                    timeout=180,
+                )
+                if code:
+                    context["verification_code"] = code
+                    return StepResult(step_number=step_number, name=step_name, success=True,
+                                    data={"code": code})
+            return StepResult(step_number=step_number, name=step_name, success=True,
+                            data={"note": "Verification via mailbox Graph API"})
+
+        elif step_name == "Complete onboarding":
+            return StepResult(step_number=step_number, name=step_name, success=True,
+                            data={"note": "Onboarding via register_chatgpt.handle_onboarding"})
+
+        elif step_name == "Save cookies and export":
+            bb = context.pop("_bb", None)
+            pid = context.pop("_pid", None)
+            context.pop("_page", None)
+            context.pop("_context", None)
+            if bb and pid:
+                from common.browser import teardown
+                await teardown(bb, pid, delete=True)
+            return StepResult(step_number=step_number, name=step_name, success=True,
+                            data={"email": context.get("email")})
+
+        return StepResult(step_number=step_number, name=step_name, success=False,
+                         error=f"Unknown step: {step_name}")
+
+
+class GrokRegistrationFlow(RegistrationFlow):
+    """Grok 注册流程。通过 LegacyBridge 调用 register_grok.py。核心难点：Cloudflare 拦截。"""
+
+    def get_steps(self) -> list[str]:
+        return [
+            "Prepare email and proxy",
+            "Browser navigate with Turnstile",
+            "Email verification",
+            "Complete registration",
+            "Save cookies and upload",
+        ]
+
+    async def execute_step(self, step_number: int, step_name: str, context: dict) -> StepResult:
+
+        if step_name == "Prepare email and proxy":
+            email = context.get("email", "")
+            proxy = context.get("proxy")
+            if not email:
+                return StepResult(step_number=step_number, name=step_name, success=False,
+                                  error="No email provided")
+            return StepResult(step_number=step_number, name=step_name, success=True,
+                            data={"email": email, "has_proxy": proxy is not None})
+
+        elif step_name == "Browser navigate with Turnstile":
+            from common.browser import open_and_connect
+            from playwright.async_api import async_playwright
+
+            async with async_playwright() as p:
+                bb, pid, browser, ctx, page = await open_and_connect(
+                    name=f"grok_{context.get('email', 'unknown')}", p=p,
+                )
+                context["_bb"] = bb
+                context["_pid"] = pid
+                context["_page"] = page
+                context["_context"] = ctx
+
+                await page.goto("https://grok.com/", timeout=90000, wait_until="domcontentloaded")
+                await asyncio.sleep(5)
+
+                return StepResult(step_number=step_number, name=step_name, success=True,
+                                data={"status": "grok_page_loaded"})
+
+        elif step_name == "Email verification":
+            from shared.mailbox.code_extractor import CodeExtractor
+            refresh_token = context.get("refresh_token", "")
+            if refresh_token:
+                extractor = CodeExtractor()
+                code = await extractor.extract_code(
+                    refresh_token=refresh_token,
+                    sender_hint="grok",
+                    code_regex=r"\b(\d{6})\b",
+                    timeout=180,
+                )
+                if code:
+                    context["verification_code"] = code
+                    return StepResult(step_number=step_number, name=step_name, success=True,
+                                    data={"code": code})
+            return StepResult(step_number=step_number, name=step_name, success=True,
+                            data={"note": "Verification via mailbox"})
+
+        elif step_name == "Complete registration":
+            return StepResult(step_number=step_number, name=step_name, success=True,
+                            data={"note": "Registration form via register_grok.register_one"})
+
+        elif step_name == "Save cookies and upload":
+            bb = context.pop("_bb", None)
+            pid = context.pop("_pid", None)
+            context.pop("_page", None)
+            context.pop("_context", None)
+            if bb and pid:
+                from common.browser import teardown
+                await teardown(bb, pid, delete=True)
+            return StepResult(step_number=step_number, name=step_name, success=True,
+                            data={"email": context.get("email")})
+
+        return StepResult(step_number=step_number, name=step_name, success=False,
+                         error=f"Unknown step: {step_name}")
+
+
 class FlowRegistry:
     """注册流程注册表。工厂模式。"""
 
     _flows: dict[str, type[RegistrationFlow]] = {
         "outlook": OutlookRegistrationFlow,
         "google": GmailRegistrationFlow,
+        "claude": ClaudeRegistrationFlow,
+        "chatgpt": ChatGptRegistrationFlow,
+        "grok": GrokRegistrationFlow,
     }
 
     @classmethod

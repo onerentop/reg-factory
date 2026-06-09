@@ -299,3 +299,50 @@ async def proxy_accounts(request: Request, path: str):
 @app.api_route("/api/config/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
 async def proxy_config(request: Request, path: str):
     return await _proxy_request(request, _CONFIG_URL, f"/config/{path}")
+
+
+# --- Operations Tools ---
+
+@app.post("/tools/unlock-outlook", response_model=ApiResponse)
+async def unlock_outlook(body: dict):
+    from worker.tasks import unlock_outlook_account
+    task = unlock_outlook_account.delay(body["email"], body["password"])
+    return ApiResponse(data={"task_id": task.id, "status": "queued"})
+
+
+@app.post("/tools/validate-keys", response_model=ApiResponse)
+async def validate_keys(body: dict):
+    from worker.tasks import validate_session_key
+    task = validate_session_key.delay(body["key"])
+    return ApiResponse(data={"task_id": task.id, "status": "queued"})
+
+
+@app.post("/tools/activate-plus", response_model=ApiResponse)
+async def activate_plus(body: dict):
+    from worker.tasks import activate_plus_account
+    task = activate_plus_account.delay(body["access_token"], body["email"], body.get("card", ""))
+    return ApiResponse(data={"task_id": task.id, "status": "queued"})
+
+
+# --- Orchestration ---
+
+@app.post("/orchestrate/all-platforms", response_model=ApiResponse)
+async def orchestrate_all_platforms(body: dict):
+    from worker.tasks import register_all_platforms
+    task = register_all_platforms.delay(
+        body["email"], body["password"],
+        body.get("platforms", ["claude", "chatgpt", "grok"]),
+        body.get("config", {}),
+    )
+    return ApiResponse(data={"task_id": task.id, "status": "queued"})
+
+
+@app.post("/orchestrate/full-flow", response_model=ApiResponse)
+async def orchestrate_full_flow(body: dict):
+    from worker.tasks import full_flow
+    task = full_flow.delay(
+        body.get("count", 1),
+        body.get("platforms", ["claude", "chatgpt", "grok"]),
+        body.get("config", {}),
+    )
+    return ApiResponse(data={"task_id": task.id, "status": "queued"})
