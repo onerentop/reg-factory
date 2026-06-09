@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Table, Select, Input, Card, Space, Tag } from 'antd'
 import { SearchOutlined } from '@ant-design/icons'
 
@@ -21,7 +21,24 @@ const actionColors: Record<string, string> = {
 }
 
 export default function AuditPage() {
-  const [logs] = useState<AuditEntry[]>([])
+  const [logs, setLogs] = useState<AuditEntry[]>([])
+  const [loading, setLoading] = useState(false)
+  const [operatorFilter, setOperatorFilter] = useState('')
+  const [actionFilter, setActionFilter] = useState<string>()
+
+  const fetchAudit = useCallback(() => {
+    setLoading(true)
+    const params = new URLSearchParams()
+    if (operatorFilter) params.set('operator', operatorFilter)
+    if (actionFilter) params.set('action', actionFilter)
+    fetch(`/api/audit?${params}`)
+      .then(r => r.json())
+      .then(res => setLogs(res.data?.items || []))
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [operatorFilter, actionFilter])
+
+  useEffect(() => { fetchAudit() }, [fetchAudit])
 
   const columns = [
     { title: '时间', dataIndex: 'created_at', key: 'time', width: 170, render: (t: string) => t ? new Date(t).toLocaleString('zh-CN') : '-' },
@@ -36,8 +53,8 @@ export default function AuditPage() {
       <h2 style={{ marginBottom: 24 }}>操作审计</h2>
       <Card size="small" style={{ marginBottom: 16 }}>
         <Space wrap>
-          <Input prefix={<SearchOutlined />} placeholder="操作人" style={{ width: 160 }} />
-          <Select placeholder="操作类型" allowClear style={{ width: 140 }}
+          <Input prefix={<SearchOutlined />} placeholder="操作人" style={{ width: 160 }} onChange={e => setOperatorFilter(e.target.value)} onPressEnter={fetchAudit} />
+          <Select placeholder="操作类型" allowClear style={{ width: 140 }} onChange={v => setActionFilter(v)}
             options={[
               { value: 'create', label: '创建' },
               { value: 'update', label: '修改' },
@@ -48,7 +65,7 @@ export default function AuditPage() {
           />
         </Space>
       </Card>
-      <Table rowKey="created_at" columns={columns} dataSource={logs} pagination={{ pageSize: 20, showTotal: t => `共 ${t} 条` }} locale={{ emptyText: '暂无审计记录' }} size="small" />
+      <Table rowKey="created_at" columns={columns} dataSource={logs} loading={loading} pagination={{ pageSize: 20, showTotal: t => `共 ${t} 条` }} locale={{ emptyText: '暂无审计记录' }} size="small" />
     </div>
   )
 }

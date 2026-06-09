@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Tabs, Card, Slider, InputNumber, Switch, Row, Col, Form, Select, Button, Space, message, Table, Tag, Progress } from 'antd'
+import { useState, useEffect } from 'react'
+import { Tabs, Card, Slider, InputNumber, Switch, Row, Col, Form, Select, Button, message, Table, Tag, Progress, Modal, Input } from 'antd'
 import { useTheme } from '../theme/ThemeProvider'
 
 function ConcurrencyTab() {
@@ -115,38 +115,118 @@ function ThemeTab() {
 }
 
 function UsersTab() {
+  const [users, setUsers] = useState<any[]>([])
+  const [addVisible, setAddVisible] = useState(false)
+  const [form] = Form.useForm()
+
+  useEffect(() => {
+    fetch('/api/auth/users').then(r => r.json())
+      .then(res => setUsers(res.data || []))
+      .catch(() => {})
+  }, [])
+
+  const addUser = async () => {
+    const values = await form.validateFields()
+    await fetch('/api/auth/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(values),
+    })
+    message.success('用户已创建')
+    setAddVisible(false)
+    form.resetFields()
+    fetch('/api/auth/users').then(r => r.json()).then(res => setUsers(res.data || []))
+  }
+
   const columns = [
     { title: '用户名', dataIndex: 'username', key: 'username' },
     { title: '角色', dataIndex: 'role', key: 'role', render: (r: string) => <Tag>{r}</Tag> },
     { title: '状态', dataIndex: 'is_active', key: 'status', render: (a: boolean) => <Tag color={a ? 'green' : 'red'}>{a ? '启用' : '禁用'}</Tag> },
-    { title: '操作', key: 'action', render: () => <Button size="small" type="link">编辑</Button> },
   ]
 
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
-        <Button type="primary">添加用户</Button>
+        <Button type="primary" onClick={() => setAddVisible(true)}>添加用户</Button>
       </div>
-      <Table rowKey="id" columns={columns} dataSource={[]} pagination={false} locale={{ emptyText: '暂无用户' }} />
+      <Table rowKey="id" columns={columns} dataSource={users} pagination={false} />
+      <Modal title="添加用户" open={addVisible} onOk={addUser} onCancel={() => setAddVisible(false)}>
+        <Form form={form} layout="vertical">
+          <Form.Item name="username" label="用户名" rules={[{ required: true }]}><Input /></Form.Item>
+          <Form.Item name="password" label="密码" rules={[{ required: true, min: 6 }]}><Input.Password /></Form.Item>
+          <Form.Item name="role" label="角色" initialValue="readonly">
+            <Select options={[
+              { value: 'admin', label: '管理员' },
+              { value: 'operator', label: '操作员' },
+              { value: 'readonly', label: '只读' },
+            ]} />
+          </Form.Item>
+        </Form>
+      </Modal>
     </div>
   )
 }
 
 function ApiKeysTab() {
+  const [keys, setKeys] = useState<any[]>([])
+  const [addVisible, setAddVisible] = useState(false)
+  const [form] = Form.useForm()
+
+  const fetchKeys = () => {
+    fetch('/api/auth/api-keys?owner_id=system').then(r => r.json())
+      .then(res => setKeys(res.data || []))
+      .catch(() => {})
+  }
+
+  useEffect(() => { fetchKeys() }, [])
+
+  const createKey = async () => {
+    const values = await form.validateFields()
+    await fetch('/api/auth/api-keys', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(values),
+    })
+    message.success('API Key 已创建')
+    setAddVisible(false)
+    form.resetFields()
+    fetchKeys()
+  }
+
+  const revokeKey = async (keyId: string) => {
+    await fetch(`/api/auth/api-keys/${keyId}`, { method: 'DELETE' })
+    message.success('已撤销')
+    fetchKeys()
+  }
+
   const columns = [
     { title: '名称', dataIndex: 'name', key: 'name' },
-    { title: 'Key', dataIndex: 'key', key: 'key', render: (k: string) => <code>{k?.slice(0, 12)}...</code> },
-    { title: '权限', dataIndex: 'scopes', key: 'scopes', render: (s: string[]) => s?.map(sc => <Tag key={sc}>{sc}</Tag>) },
+    { title: 'Key', dataIndex: 'key', key: 'key', render: (k: string) => <code>{k?.slice(0, 16)}...</code> },
+    { title: '权限', dataIndex: 'scopes', key: 'scopes', render: (s: string[]) => s?.map(sc => <Tag key={sc}>{sc}</Tag>) || '-' },
     { title: '调用量', dataIndex: 'call_count', key: 'calls' },
-    { title: '操作', key: 'action', render: () => <Button size="small" type="link" danger>撤销</Button> },
+    { title: '状态', dataIndex: 'is_active', key: 'active', render: (a: boolean) => <Tag color={a ? 'green' : 'red'}>{a ? '有效' : '已撤销'}</Tag> },
+    { title: '操作', key: 'action', render: (_: any, record: any) => record.is_active && <Button size="small" type="link" danger onClick={() => revokeKey(record.id)}>撤销</Button> },
   ]
 
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
-        <Button type="primary">创建 API Key</Button>
+        <Button type="primary" onClick={() => setAddVisible(true)}>创建 API Key</Button>
       </div>
-      <Table rowKey="id" columns={columns} dataSource={[]} pagination={false} locale={{ emptyText: '暂无 API Key' }} />
+      <Table rowKey="id" columns={columns} dataSource={keys} pagination={false} />
+      <Modal title="创建 API Key" open={addVisible} onOk={createKey} onCancel={() => setAddVisible(false)}>
+        <Form form={form} layout="vertical">
+          <Form.Item name="name" label="名称" rules={[{ required: true }]}><Input /></Form.Item>
+          <Form.Item name="scopes" label="权限范围">
+            <Select mode="multiple" options={[
+              { value: 'sms', label: 'SMS Service' },
+              { value: 'account', label: 'Account Service' },
+              { value: 'config', label: 'Config Service' },
+              { value: 'all', label: '全部' },
+            ]} />
+          </Form.Item>
+        </Form>
+      </Modal>
     </div>
   )
 }

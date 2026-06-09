@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Table, Select, DatePicker, Input, Tag, Space, Button, Card } from 'antd'
 import { SearchOutlined, ReloadOutlined } from '@ant-design/icons'
 import type { Dayjs } from 'dayjs'
@@ -24,12 +24,30 @@ const levelColors: Record<string, string> = {
 }
 
 export default function LogsPage() {
-  const [logs] = useState<LogEntry[]>([])
-  const [loading] = useState(false)
+  const [logs, setLogs] = useState<LogEntry[]>([])
+  const [loading, setLoading] = useState(false)
   const [service, setService] = useState<string>()
   const [level, setLevel] = useState<string>()
   const [keyword, setKeyword] = useState('')
   const [_dateRange, setDateRange] = useState<[Dayjs, Dayjs] | null>(null)
+
+  const fetchLogs = useCallback(() => {
+    setLoading(true)
+    const params = new URLSearchParams()
+    if (service) params.set('service', service)
+    if (level) params.set('level', level)
+    if (keyword) params.set('keyword', keyword)
+    fetch(`/api/audit?${params}`)
+      .then(r => r.json())
+      .then(res => {
+        const data = res.data || {}
+        setLogs((data.items || []).map((item: any, idx: number) => ({ ...item, id: item.id || String(idx) })))
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [service, level, keyword])
+
+  useEffect(() => { fetchLogs() }, [fetchLogs])
 
   const columns = [
     {
@@ -75,7 +93,7 @@ export default function LogsPage() {
           <Input prefix={<SearchOutlined />} placeholder="关键词搜索" style={{ width: 200 }}
             value={keyword} onChange={e => setKeyword(e.target.value)}
           />
-          <Button icon={<ReloadOutlined />}>刷新</Button>
+          <Button icon={<ReloadOutlined />} onClick={fetchLogs}>刷新</Button>
         </Space>
       </Card>
 
