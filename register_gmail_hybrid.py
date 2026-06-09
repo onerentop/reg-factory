@@ -562,6 +562,16 @@ async def run(args, worker_id=0, save_lock=None):
             browser = await p.chromium.connect_over_cdp(ws)
             cxt = browser.contexts[0] if browser.contexts else await browser.new_context()
             page = cxt.pages[0] if cxt.pages else await cxt.new_page()
+            # 禁用 WebAuthn/Passkey（阻止 Windows "保存通行密钥" 系统弹窗）
+            try:
+                _cdp = await cxt.new_cdp_session(page)
+                await _cdp.send("WebAuthn.enable", {"enableUI": False})
+                await _cdp.send("WebAuthn.addVirtualAuthenticator", {
+                    "options": {"protocol": "ctap2", "transport": "internal", "hasResidentKey": True,
+                                "hasUserVerification": True, "isUserVerified": True}
+                })
+            except Exception:
+                pass
 
             signup_url = build_signup_url()
             wlog(f"[browser] 打开注册流...")
