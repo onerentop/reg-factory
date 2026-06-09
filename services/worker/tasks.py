@@ -77,7 +77,7 @@ def register_outlook_new(self, count: int = 1, proxy: str = "", config: dict = N
         try:
             resp = _req.get("http://localhost:8000/proxy", timeout=5)
             proxy_list = resp.json().get("data", [])
-            available = [p for p in proxy_list if p.get("status") != "unavailable"]
+            available = [p for p in proxy_list if p.get("status") in ("active", "available")]
             if available:
                 import random
                 selected = random.choice(available)

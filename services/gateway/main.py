@@ -298,6 +298,20 @@ async def delete_proxy(proxy_id: str, session: AsyncSession = Depends(get_sessio
     return ApiResponse(message="Deleted")
 
 
+@app.put("/proxy/{proxy_id}/status", response_model=ApiResponse)
+async def update_proxy_status(proxy_id: str, body: dict, session: AsyncSession = Depends(get_session)):
+    import uuid
+    from sqlalchemy import select
+    stmt = select(ProxyEntry).where(ProxyEntry.id == uuid.UUID(proxy_id))
+    result = await session.execute(stmt)
+    proxy = result.scalar_one_or_none()
+    if proxy is None:
+        raise HTTPException(status_code=404, detail="Proxy not found")
+    proxy.status = body.get("status", proxy.status)
+    await session.flush()
+    return ApiResponse(data={"id": str(proxy.id), "status": proxy.status})
+
+
 # --- Service Proxy Routes ---
 import httpx as _httpx
 

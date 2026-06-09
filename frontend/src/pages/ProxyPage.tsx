@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
-import { Table, Button, Modal, Form, Input, Select, Tag, Space, message, Popconfirm } from 'antd'
-import { PlusOutlined, DeleteOutlined, ThunderboltOutlined } from '@ant-design/icons'
+import { Table, Button, Modal, Form, Input, Select, Tag, Space, message, Popconfirm, Switch } from 'antd'
+import { PlusOutlined, DeleteOutlined, ThunderboltOutlined, CheckCircleOutlined } from '@ant-design/icons'
 
 interface Proxy {
   id: string
@@ -10,19 +10,25 @@ interface Proxy {
   username?: string
   password?: string
   status: string
-  region?: string
+  active?: boolean
 }
 
 export default function ProxyPage() {
   const [proxies, setProxies] = useState<Proxy[]>([])
   const [addVisible, setAddVisible] = useState(false)
-
-  useEffect(() => {
-    fetch('/api/proxy').then(r => r.json())
-      .then(res => setProxies((res.data || []).map((p: any) => ({ ...p, id: p.id || Date.now().toString() }))))
-      .catch(() => {})
-  }, [])
   const [form] = Form.useForm()
+
+  const fetchProxies = () => {
+    fetch('/api/proxy').then(r => r.json())
+      .then(res => setProxies((res.data || []).map((p: any) => ({
+        ...p,
+        id: p.id || Date.now().toString(),
+        active: p.status === 'active' || p.status === 'available',
+      }))))
+      .catch(() => {})
+  }
+
+  useEffect(() => { fetchProxies() }, [])
 
   const addProxy = async () => {
     const values = await form.validateFields()
@@ -30,13 +36,13 @@ export default function ProxyPage() {
       const resp = await fetch('/api/proxy', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(values),
+        body: JSON.stringify({ ...values, status: 'active' }),
       })
       const data = await resp.json()
-      setProxies([...proxies, { id: data.data?.id || Date.now().toString(), ...values, status: 'unknown' }])
+      setProxies([...proxies, { id: data.data?.id || Date.now().toString(), ...values, status: 'active', active: true }])
       setAddVisible(false)
       form.resetFields()
-      message.success('代理已添加')
+      message.success('代理已添加并激活')
     } catch { message.error('添加失败') }
   }
 
@@ -48,24 +54,36 @@ export default function ProxyPage() {
     } catch { message.error('删除失败') }
   }
 
+  const toggleActive = async (id: string, active: boolean) => {
+    const newStatus = active ? 'active' : 'inactive'
+    try {
+      await fetch(`/api/proxy/${id}/status`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: newStatus }),
+      })
+      setProxies(proxies.map(p => p.id === id ? { ...p, status: newStatus, active } : p))
+    } catch { message.error('更新失败') }
+  }
+
   const testProxy = (id: string) => {
     setProxies(proxies.map(p =>
       p.id === id ? { ...p, status: 'testing' } : p
     ))
     setTimeout(() => {
       setProxies(prev => prev.map(p =>
-        p.id === id ? { ...p, status: Math.random() > 0.3 ? 'available' : 'unavailable' } : p
+        p.id === id ? { ...p, status: Math.random() > 0.3 ? 'active' : 'unavailable', active: Math.random() > 0.3 } : p
       ))
     }, 1500)
   }
 
-  const testAll = () => {
-    proxies.forEach(p => testProxy(p.id))
-  }
+  const testAll = () => { proxies.forEach(p => testProxy(p.id)) }
 
   const statusTag = (s: string) => {
     const map: Record<string, { color: string; text: string }> = {
+      active: { color: 'green', text: '已激活' },
       available: { color: 'green', text: '可用' },
+      inactive: { color: 'default', text: '未激活' },
       unavailable: { color: 'red', text: '不可用' },
       slow: { color: 'orange', text: '慢' },
       testing: { color: 'blue', text: '检测中...' },
@@ -79,8 +97,18 @@ export default function ProxyPage() {
     { title: '类型', dataIndex: 'type', key: 'type', width: 80 },
     { title: '地址', dataIndex: 'host', key: 'host' },
     { title: '端口', dataIndex: 'port', key: 'port', width: 80 },
-    { title: '用户名', dataIndex: 'username', key: 'username', render: (v: string) => v || '-' },
+    { title: '用户名', dataIndex: 'username', key: 'username', ellipsis: true, render: (v: string) => v || '-' },
     { title: '状态', dataIndex: 'status', key: 'status', width: 100, render: statusTag },
+    {
+      title: '激活', key: 'active', width: 70,
+      render: (_: any, record: Proxy) => (
+        <Switch
+          size="small"
+          checked={record.status === 'active' || record.status === 'available'}
+          onChange={(checked) => toggleActive(record.id, checked)}
+        />
+      ),
+    },
     {
       title: '操作', key: 'action', width: 150,
       render: (_: any, record: Proxy) => (
@@ -99,6 +127,9 @@ export default function ProxyPage() {
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
         <h2>代理配置</h2>
         <Space>
+          <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>
+            已激活 {proxies.filter(p => p.status === 'active' || p.status === 'available').length} / {proxies.length}
+          </span>
           <Button onClick={testAll} disabled={proxies.length === 0}>一键测试全部</Button>
           <Button type="primary" icon={<PlusOutlined />} onClick={() => setAddVisible(true)}>添加代理</Button>
         </Space>
@@ -112,13 +143,13 @@ export default function ProxyPage() {
             <Select options={[{ value: 'socks5', label: 'SOCKS5' }, { value: 'http', label: 'HTTP' }]} />
           </Form.Item>
           <Form.Item name="host" label="地址" rules={[{ required: true }]}>
-            <Input placeholder="192.168.1.1" />
+            <Input placeholder="hk.1024proxy.io" />
           </Form.Item>
           <Form.Item name="port" label="端口" rules={[{ required: true }]}>
-            <Input type="number" placeholder="1080" />
+            <Input type="number" placeholder="3000" />
           </Form.Item>
           <Form.Item name="username" label="用户名">
-            <Input />
+            <Input placeholder="sb7f3017-region-JP-sid-xxx" />
           </Form.Item>
           <Form.Item name="password" label="密码">
             <Input.Password />

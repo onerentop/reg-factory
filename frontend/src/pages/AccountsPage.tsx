@@ -34,6 +34,8 @@ export default function AccountsPage() {
   const [expandedRowKeys, setExpandedRowKeys] = useState<string[]>([])
   const [registerVisible, setRegisterVisible] = useState(false)
   const [registerCount, setRegisterCount] = useState(1)
+  const [selectedProxy, setSelectedProxy] = useState<string>('')
+  const [proxyList, setProxyList] = useState<any[]>([])
   const [registering, setRegistering] = useState(false)
   const [taskId, setTaskId] = useState<string | null>(null)
   const [taskStatus, setTaskStatus] = useState<string>('')
@@ -48,7 +50,7 @@ export default function AccountsPage() {
       const resp = await fetch('/api/register/outlook', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ count: registerCount }),
+        body: JSON.stringify({ count: registerCount, proxy: selectedProxy }),
       })
       const data = await resp.json()
       if (data.data?.task_id) {
@@ -336,7 +338,13 @@ export default function AccountsPage() {
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
         <h2>{platformTitle} 账户管理</h2>
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setRegisterVisible(true)}>新建注册</Button>
+        <Button type="primary" icon={<PlusOutlined />} onClick={() => {
+          fetch('/api/proxy').then(r => r.json()).then(res => {
+            const active = (res.data || []).filter((p: any) => p.status === 'active' || p.status === 'available')
+            setProxyList(active)
+          }).catch(() => {})
+          setRegisterVisible(true)
+        }}>新建注册</Button>
       </div>
 
       <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
@@ -412,8 +420,28 @@ export default function AccountsPage() {
               <label style={{ display: 'block', marginBottom: 8 }}>注册数量：</label>
               <InputNumber min={1} max={20} value={registerCount} onChange={(v) => setRegisterCount(v || 1)} style={{ width: '100%' }} />
             </div>
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: 'block', marginBottom: 8 }}>使用代理：</label>
+              <Select
+                style={{ width: '100%' }}
+                value={selectedProxy}
+                onChange={setSelectedProxy}
+                options={[
+                  { value: '', label: '自动选择（从已激活代理中随机）' },
+                  ...proxyList.map(p => ({
+                    value: `${p.type}://${p.username}:${p.password}@${p.host}:${p.port}`,
+                    label: `${p.host}:${p.port} (${p.username?.match(/region-(\w+)/)?.[1] || p.type})`,
+                  })),
+                ]}
+              />
+              {proxyList.length === 0 && (
+                <div style={{ color: 'var(--error)', fontSize: 12, marginTop: 4 }}>
+                  ⚠ 没有已激活的代理，请先到代理配置页面添加
+                </div>
+              )}
+            </div>
             <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginBottom: 16 }}>
-              将自动生成邮箱、使用配置的代理，通过 ixBrowser 完成注册。
+              通过 ixBrowser 完成注册，自动生成邮箱。
             </div>
             <Button type="primary" block onClick={handleStartRegister}>
               开始注册
