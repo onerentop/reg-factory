@@ -81,7 +81,6 @@ export default function ProxyPage() {
     { title: '端口', dataIndex: 'port', key: 'port', width: 80 },
     { title: '用户名', dataIndex: 'username', key: 'username', render: (v: string) => v || '-' },
     { title: '状态', dataIndex: 'status', key: 'status', width: 100, render: statusTag },
-    { title: '地区', dataIndex: 'region', key: 'region', width: 80, render: (v: string) => v || '-' },
     {
       title: '操作', key: 'action', width: 150,
       render: (_: any, record: Proxy) => (
@@ -123,9 +122,6 @@ export default function ProxyPage() {
           </Form.Item>
           <Form.Item name="password" label="密码">
             <Input.Password />
-          </Form.Item>
-          <Form.Item name="region" label="地区">
-            <Input placeholder="US / HK / JP" />
           </Form.Item>
         </Form>
       </Modal>
