@@ -66,9 +66,7 @@ class OutlookRegistrationFlow(RegistrationFlow):
     def get_steps(self) -> list[str]:
         return [
             "Generate credentials",
-            "Browser registration",
-            "Extract Graph Token",
-            "Save and cleanup",
+            "Browser registration with proxy",
         ]
 
     async def execute_step(self, step_number: int, step_name: str, context: dict) -> StepResult:
@@ -88,83 +86,34 @@ class OutlookRegistrationFlow(RegistrationFlow):
                 data={"email": email, "first_name": first, "last_name": last},
             )
 
-        elif step_name == "Browser registration":
-            from common.browser import open_and_connect
-            from register_outlook_standalone import register_outlook
-            from playwright.async_api import async_playwright
+        elif step_name == "Browser registration with proxy":
+            from common.browser_provider import get_browser_provider
+            from register_outlook_standalone import _register_one_browser
 
-            proxy_str = context.get("proxy")
+            proxy_str = context.get("proxy", "")
             idx = context.get("idx", 0)
+            bb = get_browser_provider()
 
-            async with async_playwright() as p:
-                bb, pid, browser, ctx, page = await open_and_connect(
-                    name=f"outlook_{context.get('email', 'unknown')}", p=p,
-                )
-                context["_bb"] = bb
-                context["_pid"] = pid
-                context["_browser"] = browser
-                context["_context"] = ctx
-                context["_page"] = page
+            result = await _register_one_browser(bb, idx, proxy_str)
 
-                result = await register_outlook(page, ctx, idx=idx)
-                if isinstance(result, tuple):
-                    reg_email, reg_password = result
-                    if reg_email:
-                        context["email"] = reg_email
-                        context["password"] = reg_password
-                        return StepResult(
-                            step_number=step_number, name=step_name, success=True,
-                            data={"email": reg_email},
-                        )
-
-                return StepResult(
-                    step_number=step_number, name=step_name, success=False,
-                    error="Registration failed",
-                )
-
-        elif step_name == "Extract Graph Token":
-            page = context.get("_page")
-            ctx = context.get("_context")
-            email = context.get("email", "")
-            password = context.get("password", "")
-
-            if not page or not ctx:
-                return StepResult(
-                    step_number=step_number, name=step_name, success=False,
-                    error="No browser session available",
-                )
-
-            from register_outlook_standalone import extract_graph_token
-            token = await extract_graph_token(page, ctx, email, password)
-            if token:
-                context["refresh_token"] = token
+            if result and len(result) >= 2 and result[0]:
+                email, password = result[0], result[1]
+                graph_token = result[2] if len(result) > 2 else None
+                context["email"] = email
+                context["password"] = password
+                if graph_token:
+                    context["refresh_token"] = graph_token
                 return StepResult(
                     step_number=step_number, name=step_name, success=True,
-                    data={"has_token": True},
+                    data={
+                        "email": email,
+                        "has_token": bool(graph_token),
+                    },
                 )
-            return StepResult(
-                step_number=step_number, name=step_name, success=True,
-                data={"has_token": False, "note": "Token extraction skipped or failed"},
-            )
-
-        elif step_name == "Save and cleanup":
-            bb = context.pop("_bb", None)
-            pid = context.pop("_pid", None)
-            context.pop("_browser", None)
-            context.pop("_context", None)
-            context.pop("_page", None)
-
-            if bb and pid:
-                from common.browser import teardown
-                await teardown(bb, pid, delete=True)
 
             return StepResult(
-                step_number=step_number, name=step_name, success=True,
-                data={
-                    "email": context.get("email"),
-                    "password": context.get("password"),
-                    "refresh_token": context.get("refresh_token"),
-                },
+                step_number=step_number, name=step_name, success=False,
+                error="Registration failed — check ixBrowser and proxy",
             )
 
         return StepResult(

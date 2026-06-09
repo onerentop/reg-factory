@@ -9,9 +9,9 @@ from worker.step_engine import (
 def test_outlook_steps():
     flow = OutlookRegistrationFlow()
     steps = flow.get_steps()
-    assert len(steps) == 4
+    assert len(steps) == 2
     assert "Generate credentials" in steps
-    assert "Browser registration" in steps
+    assert "Browser registration with proxy" in steps
 
 
 def test_gmail_steps():
@@ -83,4 +83,4 @@ def test_all_platforms_registered():
     for platform in ["outlook", "google", "claude", "chatgpt", "grok"]:
         flow = FlowRegistry.get(platform)
         assert flow is not None
-        assert len(flow.get_steps()) >= 4
+        assert len(flow.get_steps()) >= 2
