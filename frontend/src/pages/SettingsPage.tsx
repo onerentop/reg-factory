@@ -64,6 +64,19 @@ function ConcurrencyTab() {
           </Card>
         </Col>
       </Row>
+      <div style={{ marginTop: 16, textAlign: 'right' }}>
+        <Button type="primary" onClick={() => {
+          fetch('/api/config/concurrency', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              key: 'concurrency',
+              value: { total_max: totalMax, outlook_max: outlookMax, gmail_max: gmailMax, browser_max: browserMax, auto_protect: autoProtect },
+              category: 'concurrency',
+            }),
+          }).then(() => message.success('并发设置已保存')).catch(() => message.error('保存失败'))
+        }}>保存设置</Button>
+      </div>
     </div>
   )
 }

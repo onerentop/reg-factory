@@ -7,6 +7,9 @@ import {
   GlobalOutlined,
   SettingOutlined,
   FileTextOutlined,
+  BellOutlined,
+  AuditOutlined,
+  ClockCircleOutlined,
 } from '@ant-design/icons'
 import { Tooltip } from 'antd'
 import styles from './MainLayout.module.css'
@@ -18,6 +21,9 @@ const navItems = [
   { key: '/accounts/google', icon: <GoogleOutlined />, label: 'Google' },
   { key: '/proxy', icon: <GlobalOutlined />, label: '代理' },
   { key: '/logs', icon: <FileTextOutlined />, label: '日志' },
+  { key: '/alerts', icon: <BellOutlined />, label: '告警' },
+  { key: '/audit', icon: <AuditOutlined />, label: '审计' },
+  { key: '/schedules', icon: <ClockCircleOutlined />, label: '定时任务' },
   { key: '/settings', icon: <SettingOutlined />, label: '设置' },
 ]
 
