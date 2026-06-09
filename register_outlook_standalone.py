@@ -1953,7 +1953,10 @@ async def register_one(bb, idx, proxy_str, results, results_lock, live_fh=None, 
                 "graph": graph,
             })
             if live_fh:
-                live_fh.write(f"{email}----{password}\n")
+                line = f"{email}----{password}"
+                if graph and graph.get("refresh_token"):
+                    line += f"----{GRAPH_CLIENT_ID}----{graph['refresh_token']}"
+                live_fh.write(line + "\n")
                 live_fh.flush()
             print(f"  {tag} SUCCESS [{used_mode}]: {email}")
         else:
@@ -2056,45 +2059,25 @@ async def main():
     ok_count = 0
     graph_count = 0
     mode_counts = {"protocol": 0, "headless": 0, "browser": 0}
-    ts_str = datetime.now().strftime('%Y%m%d_%H%M%S')
-    output_file = os.path.join(OUTPUT_DIR, f"accounts_{ts_str}.txt")
-    token_file = os.path.join(OUTPUT_DIR, f"graph_tokens_{ts_str}.json")
 
-    all_tokens = []
-    with open(output_file, "w", encoding="utf-8") as f:
-        for r in sorted(results, key=lambda x: x['index']):
-            if r['status'] == "OK":
-                ok_count += 1
-                line = f"{r['email']}----{r['password']}"
-                graph = r.get("graph")
-                if graph and graph.get("refresh_token"):
-                    graph_count += 1
-                    line += f"----{graph['refresh_token']}"
-                    all_tokens.append({
-                        "email": r['email'],
-                        "password": r['password'],
-                        "access_token": graph.get('access_token'),
-                        "refresh_token": graph.get('refresh_token'),
-                        "expires_in": graph.get('expires_in'),
-                    })
-                f.write(line + "\n")
-                used = r.get("mode", "?")
-                mode_counts[used] = mode_counts.get(used, 0) + 1
-                gt = " +graph" if graph and graph.get("refresh_token") else ""
-                print(f"  #{r['index']} [OK/{used}{gt}] {r['email']} / {r['password']}")
-            else:
-                print(f"  #{r['index']} [{r['status']}] -")
-
-    if all_tokens:
-        with open(token_file, "w", encoding="utf-8") as f:
-            json.dump(all_tokens, f, indent=2, ensure_ascii=False)
+    for r in sorted(results, key=lambda x: x['index']):
+        if r['status'] == "OK":
+            ok_count += 1
+            used = r.get("mode", "?")
+            mode_counts[used] = mode_counts.get(used, 0) + 1
+            graph = r.get("graph")
+            gt = ""
+            if graph and graph.get("refresh_token"):
+                graph_count += 1
+                gt = " +graph"
+            print(f"  #{r['index']} [OK/{used}{gt}] {r['email']} / {r['password']}")
+        else:
+            print(f"  #{r['index']} [{r['status']}] -")
 
     mode_str = "  |  ".join(f"{m}:{c}" for m, c in mode_counts.items() if c > 0)
     print(f"\n  Success: {ok_count}/{len(results)}  |  {mode_str}  |  Graph tokens: {graph_count}")
     if ok_count > 0:
-        print(f"  Accounts: {output_file}")
-    if graph_count > 0:
-        print(f"  Tokens:   {token_file}")
+        print(f"  Accounts: {live_file}")
     print("=" * 60)
 
 
