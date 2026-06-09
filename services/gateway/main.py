@@ -301,6 +301,37 @@ async def proxy_config(request: Request, path: str):
     return await _proxy_request(request, _CONFIG_URL, f"/config/{path}")
 
 
+# --- Registration Trigger ---
+
+@app.post("/register/outlook", response_model=ApiResponse)
+async def trigger_outlook_registration(body: dict = {}):
+    """从前端触发 Outlook 注册。"""
+    from worker.tasks import register_outlook_new
+    count = body.get("count", 1)
+    proxy = body.get("proxy", "")
+    config = body.get("config", {})
+    task = register_outlook_new.delay(count, proxy, config)
+    return ApiResponse(data={"task_id": task.id, "status": "queued", "count": count})
+
+
+@app.get("/tasks/{task_id}", response_model=ApiResponse)
+async def get_task_status(task_id: str):
+    """查询 Celery 任务状态和结果。"""
+    from worker.tasks import celery_app as _celery
+    result = _celery.AsyncResult(task_id)
+    data = {
+        "task_id": task_id,
+        "status": result.status,
+        "ready": result.ready(),
+    }
+    if result.ready():
+        if result.successful():
+            data["result"] = result.result
+        else:
+            data["error"] = str(result.result)
+    return ApiResponse(data=data)
+
+
 # --- Operations Tools ---
 
 @app.post("/tools/unlock-outlook", response_model=ApiResponse)

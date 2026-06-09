@@ -27,13 +27,19 @@ class LegacyBridge:
     def ensure_importable(self) -> None:
         if self._root not in sys.path:
             sys.path.insert(0, self._root)
-        self._patch_stdin()
+        self._patch_stdio()
 
     @staticmethod
-    def _patch_stdin() -> None:
-        """旧脚本顶层有 sys.stdin.reconfigure()，pytest 的 stdin 不支持。"""
+    def _patch_stdio() -> None:
+        """旧脚本顶层有 sys.stdout/stdin.reconfigure()，
+        pytest 和 Celery Worker 的 IO 代理不支持该方法。"""
         if not hasattr(sys.stdin, "reconfigure"):
             sys.stdin = open(os.devnull, "r")
+        if not hasattr(sys.stdout, "reconfigure"):
+            import io
+            sys.stdout = io.TextIOWrapper(sys.stdout.buffer if hasattr(sys.stdout, 'buffer') else open(os.devnull, 'wb'), encoding='utf-8')
+        if not hasattr(sys.stderr, "reconfigure"):
+            pass
 
     def get_config(self, key: str, default: str = "") -> str:
         self.ensure_importable()

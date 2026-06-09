@@ -57,6 +57,42 @@ def cleanup_old_logs():
     return {"status": "cleaned"}
 
 
+@celery_app.task(name="register_outlook_new", bind=True)
+def register_outlook_new(self, count: int = 1, proxy: str = "", config: dict = None):
+    """从前端触发的 Outlook 新账号注册。自动生成邮箱，自动选代理。"""
+    import asyncio
+    import os
+    import random
+    from worker.step_engine import FlowRegistry
+    from worker.legacy_bridge import LegacyBridge
+
+    bridge = LegacyBridge()
+    bridge.ensure_importable()
+
+    if not proxy:
+        raw = os.environ.get("OUTLOOK_PROXIES", "")
+        proxies = [p.strip() for p in raw.replace(",", "\n").splitlines() if p.strip() and not p.strip().startswith("#")]
+        proxy = random.choice(proxies) if proxies else ""
+
+    async def _run():
+        results = []
+        for i in range(count):
+            flow = FlowRegistry.get("outlook")
+            context = {"idx": i, "proxy": proxy, **(config or {})}
+            step_results = await flow.run(context)
+            success = all(r.success for r in step_results)
+            results.append({
+                "index": i,
+                "success": success,
+                "email": context.get("email", ""),
+                "has_token": bool(context.get("refresh_token")),
+                "steps": [{"name": r.name, "success": r.success, "error": r.error, "duration_ms": r.duration_ms} for r in step_results],
+            })
+        return {"count": count, "results": results}
+
+    return asyncio.run(_run())
+
+
 @celery_app.task(name="register_account", bind=True)
 def register_account(self, platform: str, email: str, config: dict):
     """注册账户的 Celery 任务入口。同步包装异步流程。"""
