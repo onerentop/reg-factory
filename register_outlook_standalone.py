@@ -399,7 +399,7 @@ async def extract_graph_token(page, context, email, password, idx=0):
             f"&response_type=code"
             f"&redirect_uri={urllib.parse.quote(GRAPH_REDIRECT_URI, safe='')}"
             f"&scope={urllib.parse.quote(GRAPH_SCOPE)}"
-            f"&prompt=consent"
+            f"&prompt=login"
         )
         print(f"  {tag} [graph] navigating to OAuth consent...")
         # 拦截 nativeclient redirect（浏览器会报 chrome-error，但我们只需要 URL 里的 code）
