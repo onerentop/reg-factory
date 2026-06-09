@@ -112,11 +112,15 @@ class AccountService:
 
     def _to_read(self, account) -> AccountRead:
         steps = []
-        if hasattr(account, "steps") and account.steps:
-            steps = [StepRead(
-                step_number=s.step_number, name=s.name, status=s.status.value,
-                error_message=s.error_message, duration_ms=s.duration_ms,
-            ) for s in account.steps]
+        try:
+            loaded_steps = getattr(account, "steps", None)
+            if loaded_steps:
+                steps = [StepRead(
+                    step_number=s.step_number, name=s.name, status=s.status.value,
+                    error_message=s.error_message, duration_ms=s.duration_ms,
+                ) for s in loaded_steps]
+        except Exception:
+            pass
         return AccountRead(
             id=str(account.id),
             email=account.email,

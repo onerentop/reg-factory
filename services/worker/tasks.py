@@ -81,16 +81,44 @@ def register_outlook_new(self, count: int = 1, proxy: str = "", config: dict = N
     print(f"[register_outlook_new] proxy={'yes: ' + proxy[:30] + '...' if proxy else 'NONE'}, count={count}")
 
     async def _run():
+        import httpx
         results = []
         for i in range(count):
             flow = FlowRegistry.get("outlook")
             context = {"idx": i, "proxy": proxy, **(config or {})}
             step_results = await flow.run(context)
             success = all(r.success for r in step_results)
+            email = context.get("email", "")
+            password = context.get("password", "")
+
+            if success and email:
+                try:
+                    async with httpx.AsyncClient(timeout=10) as client:
+                        create_resp = await client.post("http://localhost:8002/accounts", json={
+                            "email": email,
+                            "password": password,
+                            "platform": "outlook",
+                            "total_steps": len(step_results),
+                            "metadata": {
+                                "refresh_token": context.get("refresh_token", ""),
+                                "proxy": proxy[:30] if proxy else "",
+                            },
+                        })
+                        account_data = create_resp.json().get("data", {})
+                        account_id = account_data.get("id")
+                        if account_id:
+                            await client.put(f"http://localhost:8002/accounts/{account_id}", json={
+                                "status": "success",
+                                "current_step": len(step_results),
+                            })
+                    print(f"[register_outlook_new] saved to Account Service: {email}")
+                except Exception as e:
+                    print(f"[register_outlook_new] failed to save to Account Service: {e}")
+
             results.append({
                 "index": i,
                 "success": success,
-                "email": context.get("email", ""),
+                "email": email,
                 "has_token": bool(context.get("refresh_token")),
                 "steps": [{"name": r.name, "success": r.success, "error": r.error, "duration_ms": r.duration_ms} for r in step_results],
             })

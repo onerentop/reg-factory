@@ -23,6 +23,10 @@ db = DatabaseManager(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _ = db.engine
+    from shared.base_model import BaseModel
+    from account_service.models import Account, RegistrationStep
+    async with db.engine.begin() as conn:
+        await conn.run_sync(BaseModel.metadata.create_all)
     logger = setup_logger("account_service")
     logger.info("Account Service starting")
     yield
