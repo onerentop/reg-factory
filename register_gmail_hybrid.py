@@ -865,33 +865,38 @@ def save_account(acct):
         log(f"[save] 写入失败: {e}", "WARN")
 
 
+async def _main_async(args):
+    sem = asyncio.Semaphore(args.parallel)
+
+    async def worker(i):
+        async with sem:
+            log("=" * 50)
+            log(f"### 第 {i}/{args.count} 个账号 ###")
+            log("=" * 50)
+            try:
+                return await run(args, worker_id=i)
+            except Exception as e:
+                log(f"[W{i}] 异常: {e}", "ERR")
+                return None
+
+    tasks = [worker(i) for i in range(1, args.count + 1)]
+    results = await asyncio.gather(*tasks)
+
+    ok = sum(1 for r in results if r and r.get("email"))
+    log(f"批量完成: 成功 {ok}/{args.count}，结果见 accounts_gmail.txt", "OK")
+    return 0 if ok else 1
+
+
 def main():
     ap = argparse.ArgumentParser(description="Gmail 混合注册(浏览器铸BotGuard+HTTP手机验证)")
     ap.add_argument("--auto-sms", action="store_true", help="自动接码完成手机验证")
     ap.add_argument("--manual", action="store_true", help="浏览器里全手动填，脚本只接管手机步")
     ap.add_argument("--wait", type=int, default=240, help="等待到手机页的最大秒数")
     ap.add_argument("--count", type=int, default=1, help="批量注册个数")
-    ap.add_argument("--delete-window", action="store_true", help="注册后删除窗口(默认保留=一号一窗口)")
+    ap.add_argument("--parallel", type=int, default=1, help="并发窗口数(默认1)")
+    ap.add_argument("--delete-window", action="store_true", help="注册后删除窗口(默认保留)")
     args = ap.parse_args()
-
-    ok = 0
-    for i in range(1, args.count + 1):
-        log("=" * 60)
-        log(f"### 第 {i}/{args.count} 个账号 ###")
-        log("=" * 60)
-        try:
-            result = asyncio.run(run(args))
-            if result and result.get("email"):
-                ok += 1
-                log(f"### 第 {i} 个成功: {result['email']} (累计 {ok}/{i}) ###", "OK")
-            else:
-                log(f"### 第 {i} 个未成功 (累计 {ok}/{i}) ###", "WARN")
-        except Exception as e:
-            log(f"### 第 {i} 个异常: {e} ###", "ERR")
-        if i < args.count:
-            time.sleep(3)
-    log(f"批量完成: 成功 {ok}/{args.count}，结果见 accounts_gmail.txt", "OK")
-    return 0 if ok else 1
+    return asyncio.run(_main_async(args))
 
 
 if __name__ == "__main__":
