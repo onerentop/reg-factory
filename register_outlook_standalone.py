@@ -418,6 +418,15 @@ async def extract_graph_token(page, context, email, password, idx=0):
             if "code=" in current_url:
                 break
 
+            # ResetPassword / passkey 页面 → 回退重试
+            if "ResetPassword" in current_url or "interrupt" in current_url:
+                try:
+                    await page.go_back(timeout=8000)
+                    await asyncio.sleep(3)
+                    continue
+                except Exception:
+                    pass
+
             # 1. 邮箱输入页（先于密码）
             email_input = page.locator('input[type="email"], input[name="loginfmt"], input#usernameEntry, input#identifierId').first
             if not logged_in and await email_input.count() > 0 and await email_input.is_visible():
