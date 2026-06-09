@@ -19,6 +19,8 @@ class TxtExporter(ExportStrategy):
         for a in accounts:
             tokens = a.get("tokens") or {}
             refresh_token = tokens.get("refresh_token", "")
+            if isinstance(refresh_token, dict):
+                refresh_token = refresh_token.get("refresh_token", "")
             client_id = tokens.get("client_id", "9e5f94bc-e8a4-4e73-b8be-63364c29d753") if refresh_token else ""
             parts = [
                 a.get("email", ""),

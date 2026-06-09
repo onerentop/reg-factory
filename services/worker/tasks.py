@@ -131,7 +131,11 @@ def register_outlook_new(self, count: int = 1, proxy: str = "", config: dict = N
                         account_data = create_resp.json().get("data", {})
                         account_id = account_data.get("id")
                         if account_id:
-                            refresh_token = context.get("refresh_token", "")
+                            raw_token = context.get("refresh_token", "")
+                            if isinstance(raw_token, dict):
+                                refresh_token = raw_token.get("refresh_token", "")
+                            else:
+                                refresh_token = str(raw_token) if raw_token else ""
                             await client.put(f"http://localhost:8002/accounts/{account_id}", json={
                                 "status": "success",
                                 "current_step": len(step_results),
