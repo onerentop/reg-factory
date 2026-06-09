@@ -64,8 +64,30 @@ def register_account(self, platform: str, email: str, config: dict):
     from worker.step_engine import FlowRegistry
 
     async def _run():
+        # 通过代理分配策略选择代理
+        proxy_config = config.get("proxy")
+        if not proxy_config:
+            try:
+                import httpx as _hx
+                resp = _hx.get(
+                    config.get("gateway_url", "http://localhost:8000") + "/proxy",
+                    timeout=5,
+                )
+                proxies = resp.json().get("data", [])
+                available = [p for p in proxies if p.get("status") != "unavailable"]
+                if available:
+                    from gateway.proxy_manager import ALLOCATOR_MAP
+                    strategy_name = config.get("proxy_strategy", "round_robin")
+                    allocator_cls = ALLOCATOR_MAP.get(strategy_name, ALLOCATOR_MAP["round_robin"])
+                    allocator = allocator_cls()
+                    selected = allocator.select(available)
+                    if selected:
+                        proxy_config = selected
+            except Exception:
+                pass
+        context = {"email": email, "proxy": proxy_config, **config}
+
         flow = FlowRegistry.get(platform)
-        context = {"email": email, **config}
         results = await flow.run(context)
         return [
             {"step": r.step_number, "name": r.name, "success": r.success,

@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from shared.database import DatabaseManager
 from shared.log_handler import setup_logger
 from shared.base_schema import ApiResponse
-from shared.auth import JwtAuthStrategy
+from shared.auth import JwtAuthStrategy, RoleChecker, AuthResult
 from gateway.schemas import (
     LoginRequest, UserCreate, ApiKeyCreate, AlertRuleWrite,
 )
@@ -29,6 +29,7 @@ db = DatabaseManager(
 jwt_strategy = JwtAuthStrategy(
     secret=os.getenv("JWT_SECRET_KEY", "dev-secret-change-me"),
 )
+role_checker = RoleChecker(jwt_strategy)
 
 
 @asynccontextmanager
@@ -93,7 +94,7 @@ async def login(body: LoginRequest, service: AuthService = Depends(get_auth_serv
 
 
 @app.post("/auth/users", response_model=ApiResponse)
-async def create_user(body: UserCreate, service: AuthService = Depends(get_auth_service)):
+async def create_user(body: UserCreate, service: AuthService = Depends(get_auth_service), _auth: AuthResult = Depends(role_checker.require_role("admin"))):
     user = await service.create_user(body.username, body.password, body.role)
     from shared.audit import AuditRecorder
     recorder = AuditRecorder()
@@ -102,7 +103,7 @@ async def create_user(body: UserCreate, service: AuthService = Depends(get_auth_
 
 
 @app.get("/auth/users", response_model=ApiResponse)
-async def list_users(service: AuthService = Depends(get_auth_service)):
+async def list_users(service: AuthService = Depends(get_auth_service), _auth: AuthResult = Depends(role_checker.require_role("admin"))):
     users = await service.list_users()
     return ApiResponse(data=[u.model_dump() for u in users])
 
@@ -110,7 +111,7 @@ async def list_users(service: AuthService = Depends(get_auth_service)):
 # --- API Keys ---
 
 @app.post("/auth/api-keys", response_model=ApiResponse)
-async def create_api_key(body: ApiKeyCreate, service: AuthService = Depends(get_auth_service)):
+async def create_api_key(body: ApiKeyCreate, service: AuthService = Depends(get_auth_service), _auth: AuthResult = Depends(role_checker.require_role("admin"))):
     key = await service.create_api_key(body.name, "system", body.scopes)
     return ApiResponse(data=key.model_dump())
 
@@ -122,7 +123,7 @@ async def list_api_keys(owner_id: str = "system", service: AuthService = Depends
 
 
 @app.delete("/auth/api-keys/{key_id}", response_model=ApiResponse)
-async def revoke_api_key(key_id: str, service: AuthService = Depends(get_auth_service)):
+async def revoke_api_key(key_id: str, service: AuthService = Depends(get_auth_service), _auth: AuthResult = Depends(role_checker.require_role("admin"))):
     revoked = await service.revoke_api_key(key_id)
     if not revoked:
         raise HTTPException(status_code=404, detail="API key not found")
@@ -191,6 +192,7 @@ async def list_alert_rules(engine: AlertEngine = Depends(get_alert_engine)):
 @app.post("/alerts/rules", response_model=ApiResponse)
 async def create_alert_rule(
     body: AlertRuleWrite, session: AsyncSession = Depends(get_session),
+    _auth: AuthResult = Depends(role_checker.require_role("operator")),
 ):
     repo = AlertRuleRepository(session)
     rule = await repo.create(
@@ -230,7 +232,7 @@ async def list_proxies(session: AsyncSession = Depends(get_session)):
 
 
 @app.post("/proxy", response_model=ApiResponse)
-async def add_proxy(body: dict, session: AsyncSession = Depends(get_session)):
+async def add_proxy(body: dict, session: AsyncSession = Depends(get_session), _auth: AuthResult = Depends(role_checker.require_role("operator"))):
     proxy = ProxyEntry(
         type=body.get("type", "socks5"), host=body["host"], port=int(body["port"]),
         username=body.get("username"), password=body.get("password"),
@@ -245,7 +247,7 @@ async def add_proxy(body: dict, session: AsyncSession = Depends(get_session)):
 
 
 @app.delete("/proxy/{proxy_id}", response_model=ApiResponse)
-async def delete_proxy(proxy_id: str, session: AsyncSession = Depends(get_session)):
+async def delete_proxy(proxy_id: str, session: AsyncSession = Depends(get_session), _auth: AuthResult = Depends(role_checker.require_role("operator"))):
     import uuid
     from sqlalchemy import select
     stmt = select(ProxyEntry).where(ProxyEntry.id == uuid.UUID(proxy_id))

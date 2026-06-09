@@ -2,6 +2,7 @@ from typing import Any
 from gateway.repository import AlertRuleRepository, AlertHistoryRepository
 from gateway.schemas import AlertRuleRead
 from gateway.websocket_hub import ws_manager
+from gateway.notifiers import NotifierChain, WebNotifier, WebhookNotifier
 
 
 class AlertEngine:
@@ -11,9 +12,11 @@ class AlertEngine:
         self,
         rule_repo: AlertRuleRepository,
         history_repo: AlertHistoryRepository,
+        notifier_chain: NotifierChain | None = None,
     ):
         self._rule_repo = rule_repo
         self._history_repo = history_repo
+        self._notifier_chain = notifier_chain
 
     async def list_rules(self) -> list[AlertRuleRead]:
         rules = await self._rule_repo.get_enabled()
@@ -33,6 +36,8 @@ class AlertEngine:
             "rule_type": rule_type,
             "message": message,
         })
+        if self._notifier_chain:
+            await self._notifier_chain.send_all(rule_name, message, {"rule_type": rule_type})
 
     async def check_balance_alert(self, provider: str, balance: float, threshold: float) -> None:
         if balance < threshold:
