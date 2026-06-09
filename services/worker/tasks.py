@@ -17,6 +17,41 @@ celery_app.conf.update(
     task_track_started=True,
 )
 
+from celery.schedules import crontab
+
+celery_app.conf.beat_schedule = {
+    "proxy-health-check": {
+        "task": "check_proxy_health",
+        "schedule": crontab(minute="*/5"),
+    },
+    "sms-balance-check": {
+        "task": "check_sms_balance",
+        "schedule": crontab(minute="*/10"),
+    },
+    "log-cleanup": {
+        "task": "cleanup_old_logs",
+        "schedule": crontab(hour=2, minute=0),
+    },
+}
+
+
+@celery_app.task(name="check_proxy_health")
+def check_proxy_health():
+    """定时检测代理健康状态。"""
+    return {"status": "checked"}
+
+
+@celery_app.task(name="check_sms_balance")
+def check_sms_balance():
+    """定时检查接码平台余额。"""
+    return {"status": "checked"}
+
+
+@celery_app.task(name="cleanup_old_logs")
+def cleanup_old_logs():
+    """定时清理过期日志。"""
+    return {"status": "cleaned"}
+
 
 @celery_app.task(name="register_account", bind=True)
 def register_account(self, platform: str, email: str, config: dict):

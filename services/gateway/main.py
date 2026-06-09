@@ -1,7 +1,7 @@
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Depends, HTTPException, WebSocket, WebSocketDisconnect, Query
+from fastapi import FastAPI, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -34,6 +34,10 @@ jwt_strategy = JwtAuthStrategy(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _ = db.engine
+    from shared.config_client import ConfigClient
+    config_client = ConfigClient(config_service_url=os.getenv("CONFIG_SERVICE_URL", "http://localhost:8003"))
+    await config_client.load_from_service()
+    app.state.config_client = config_client
     logger = setup_logger("gateway")
     logger.info("Gateway starting")
     yield
@@ -91,6 +95,9 @@ async def login(body: LoginRequest, service: AuthService = Depends(get_auth_serv
 @app.post("/auth/users", response_model=ApiResponse)
 async def create_user(body: UserCreate, service: AuthService = Depends(get_auth_service)):
     user = await service.create_user(body.username, body.password, body.role)
+    from shared.audit import AuditRecorder
+    recorder = AuditRecorder()
+    recorder.record(operator="system", action="create_user", target=body.username)
     return ApiResponse(data=user.model_dump())
 
 
@@ -119,6 +126,9 @@ async def revoke_api_key(key_id: str, service: AuthService = Depends(get_auth_se
     revoked = await service.revoke_api_key(key_id)
     if not revoked:
         raise HTTPException(status_code=404, detail="API key not found")
+    from shared.audit import AuditRecorder
+    recorder = AuditRecorder()
+    recorder.record(operator="system", action="revoke_api_key", target=key_id)
     return ApiResponse(message="API key revoked")
 
 
@@ -213,4 +223,45 @@ async def delete_proxy(proxy_id: str, session: AsyncSession = Depends(get_sessio
         raise HTTPException(status_code=404, detail="Proxy not found")
     await session.delete(proxy)
     await session.flush()
+    from shared.audit import AuditRecorder
+    recorder = AuditRecorder()
+    recorder.record(operator="system", action="delete_proxy", target=proxy_id)
     return ApiResponse(message="Deleted")
+
+
+# --- Service Proxy Routes ---
+import httpx as _httpx
+
+_SMS_URL = os.getenv("SMS_SERVICE_URL", "http://localhost:8001")
+_ACCOUNT_URL = os.getenv("ACCOUNT_SERVICE_URL", "http://localhost:8002")
+_CONFIG_URL = os.getenv("CONFIG_SERVICE_URL", "http://localhost:8003")
+
+
+async def _proxy_request(request: Request, target_base: str, path: str) -> dict:
+    """通用代理转发。"""
+    async with _httpx.AsyncClient(timeout=30) as client:
+        url = f"{target_base}{path}"
+        body = await request.body()
+        resp = await client.request(
+            method=request.method,
+            url=url,
+            content=body if body else None,
+            headers={"Content-Type": request.headers.get("Content-Type", "application/json")},
+            params=dict(request.query_params),
+        )
+        return resp.json()
+
+
+@app.api_route("/api/sms/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
+async def proxy_sms(request: Request, path: str):
+    return await _proxy_request(request, _SMS_URL, f"/sms/{path}")
+
+
+@app.api_route("/api/accounts/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
+async def proxy_accounts(request: Request, path: str):
+    return await _proxy_request(request, _ACCOUNT_URL, f"/accounts/{path}")
+
+
+@app.api_route("/api/config/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
+async def proxy_config(request: Request, path: str):
+    return await _proxy_request(request, _CONFIG_URL, f"/config/{path}")

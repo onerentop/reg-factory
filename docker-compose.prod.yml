@@ -31,6 +31,23 @@ services:
         limits:
           memory: 256M
 
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    environment:
+      DATABASE_URL: postgresql://regfactory:${POSTGRES_PASSWORD:-regfactory}@postgres:5432/regfactory
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: 200
+      DEFAULT_POOL_SIZE: 30
+    ports:
+      - "6432:6432"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+
   gateway:
     build:
       context: ./services
@@ -39,7 +56,7 @@ services:
     ports:
       - "8000:8000"
     environment:
-      DATABASE_URL: postgresql+asyncpg://regfactory:${POSTGRES_PASSWORD:-regfactory}@postgres:5432/regfactory
+      DATABASE_URL: postgresql+asyncpg://regfactory:${POSTGRES_PASSWORD:-regfactory}@pgbouncer:6432/regfactory
       REDIS_URL: redis://redis:6379/0
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-in-production}
       ACCOUNT_SERVICE_URL: http://account:8002
@@ -62,7 +79,7 @@ services:
     ports:
       - "8001:8001"
     environment:
-      DATABASE_URL: postgresql+asyncpg://regfactory:${POSTGRES_PASSWORD:-regfactory}@postgres:5432/regfactory
+      DATABASE_URL: postgresql+asyncpg://regfactory:${POSTGRES_PASSWORD:-regfactory}@pgbouncer:6432/regfactory
       REDIS_URL: redis://redis:6379/0
     depends_on:
       postgres:
@@ -76,7 +93,7 @@ services:
     ports:
       - "8002:8002"
     environment:
-      DATABASE_URL: postgresql+asyncpg://regfactory:${POSTGRES_PASSWORD:-regfactory}@postgres:5432/regfactory
+      DATABASE_URL: postgresql+asyncpg://regfactory:${POSTGRES_PASSWORD:-regfactory}@pgbouncer:6432/regfactory
       REDIS_URL: redis://redis:6379/0
     depends_on:
       postgres:
@@ -90,7 +107,7 @@ services:
     ports:
       - "8003:8003"
     environment:
-      DATABASE_URL: postgresql+asyncpg://regfactory:${POSTGRES_PASSWORD:-regfactory}@postgres:5432/regfactory
+      DATABASE_URL: postgresql+asyncpg://regfactory:${POSTGRES_PASSWORD:-regfactory}@pgbouncer:6432/regfactory
       REDIS_URL: redis://redis:6379/0
     depends_on:
       postgres:
@@ -102,7 +119,7 @@ services:
       dockerfile: Dockerfile
     command: celery -A worker.tasks worker --loglevel=info --pool=gevent --concurrency=10
     environment:
-      DATABASE_URL: postgresql+asyncpg://regfactory:${POSTGRES_PASSWORD:-regfactory}@postgres:5432/regfactory
+      DATABASE_URL: postgresql+asyncpg://regfactory:${POSTGRES_PASSWORD:-regfactory}@pgbouncer:6432/regfactory
       REDIS_URL: redis://redis:6379/0
     depends_on:
       postgres:

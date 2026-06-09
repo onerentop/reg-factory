@@ -1,9 +1,9 @@
 from typing import Any
-import httpx
+from shared.http_client import ResilientHttpClient
 
 
 class DashboardAggregator:
-    """仪表盘数据聚合器。从各微服务收集数据组装统一视图。"""
+    """仪表盘数据聚合器。使用 ResilientHttpClient（带熔断）。"""
 
     def __init__(
         self,
@@ -12,33 +12,28 @@ class DashboardAggregator:
     ):
         self._account_url = account_service_url
         self._sms_url = sms_service_url
+        self._client = ResilientHttpClient(timeout=10, failure_threshold=3, recovery_timeout=15)
 
     async def get_dashboard_data(self) -> dict[str, Any]:
-        async with httpx.AsyncClient(timeout=10) as client:
-            account_stats = await self._fetch_account_stats(client)
-            sms_stats = await self._fetch_sms_stats(client)
+        account_stats = await self._fetch_account_stats()
+        sms_stats = await self._fetch_sms_stats()
+        return {"accounts": account_stats, "sms": sms_stats}
 
-        return {
-            "accounts": account_stats,
-            "sms": sms_stats,
-        }
-
-    async def _fetch_account_stats(self, client: httpx.AsyncClient) -> dict:
+    async def _fetch_account_stats(self) -> dict:
         try:
-            resp = await client.get(f"{self._account_url}/accounts", params={"page_size": 1})
-            if resp.status_code == 200:
-                data = resp.json().get("data", {})
-                return {"total": data.get("total", 0)}
+            resp = await self._client.get(f"{self._account_url}/accounts", params={"page_size": "1"})
+            data = resp.json().get("data", {})
+            return {"total": data.get("total", 0)}
         except Exception:
-            pass
-        return {"total": 0, "error": "Account service unavailable"}
+            return {"total": 0, "error": "Account service unavailable"}
 
-    async def _fetch_sms_stats(self, client: httpx.AsyncClient) -> dict:
+    async def _fetch_sms_stats(self) -> dict:
         try:
-            resp = await client.get(f"{self._sms_url}/sms/providers")
-            if resp.status_code == 200:
-                providers = resp.json().get("data", [])
-                return {"providers_count": len(providers)}
+            resp = await self._client.get(f"{self._sms_url}/sms/providers")
+            providers = resp.json().get("data", [])
+            return {"providers_count": len(providers)}
         except Exception:
-            pass
-        return {"providers_count": 0, "error": "SMS service unavailable"}
+            return {"providers_count": 0, "error": "SMS service unavailable"}
+
+    async def close(self) -> None:
+        await self._client.close()
