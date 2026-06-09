@@ -2,9 +2,11 @@ import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Depends
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.database import DatabaseManager
+from shared.log_handler import setup_logger
 
 db = DatabaseManager(
     url=os.getenv("DATABASE_URL", "sqlite+aiosqlite:///regfactory_dev.db")
@@ -14,11 +16,20 @@ db = DatabaseManager(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _ = db.engine
+    logger = setup_logger("sms_service")
+    logger.info("SMS Service starting")
     yield
     await db.close()
 
 
 app = FastAPI(title="RegFactory SMS Service", version="0.1.0", lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 async def get_session():

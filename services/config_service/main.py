@@ -1,11 +1,13 @@
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.database import DatabaseManager
 from shared.base_schema import ApiResponse
+from shared.log_handler import setup_logger
 from config_service.schemas import ConfigWrite
 from config_service.repository import ConfigRepository, ConfigVersionRepository
 from config_service.service import ConfigService
@@ -19,11 +21,20 @@ db = DatabaseManager(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _ = db.engine
+    logger = setup_logger("config_service")
+    logger.info("Config Service starting")
     yield
     await db.close()
 
 
 app = FastAPI(title="RegFactory Config Service", version="0.1.0", lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 async def get_session():

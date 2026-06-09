@@ -2,9 +2,11 @@ import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Depends, HTTPException, WebSocket, WebSocketDisconnect, Query
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.database import DatabaseManager
+from shared.log_handler import setup_logger
 from shared.base_schema import ApiResponse
 from shared.auth import JwtAuthStrategy
 from gateway.schemas import (
@@ -32,11 +34,20 @@ jwt_strategy = JwtAuthStrategy(
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     _ = db.engine
+    logger = setup_logger("gateway")
+    logger.info("Gateway starting")
     yield
     await db.close()
 
 
 app = FastAPI(title="RegFactory Gateway", version="0.1.0", lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 async def get_session():
