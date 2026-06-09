@@ -59,9 +59,8 @@ def cleanup_old_logs():
 
 @celery_app.task(name="register_outlook_new", bind=True)
 def register_outlook_new(self, count: int = 1, proxy: str = "", config: dict = None):
-    """从前端触发的 Outlook 新账号注册。自动生成邮箱，自动选代理。"""
+    """从前端触发的 Outlook 新账号注册。自动生成邮箱，从代理管理获取代理。"""
     import asyncio
-    import os
     import random
     from worker.step_engine import FlowRegistry
     from worker.legacy_bridge import LegacyBridge
@@ -74,9 +73,26 @@ def register_outlook_new(self, count: int = 1, proxy: str = "", config: dict = N
         pass
 
     if not proxy:
-        raw = os.environ.get("OUTLOOK_PROXIES", "")
-        proxies = [p.strip() for p in raw.replace(",", "\n").splitlines() if p.strip() and not p.strip().startswith("#")]
-        proxy = random.choice(proxies) if proxies else ""
+        import requests as _req
+        try:
+            resp = _req.get("http://localhost:8000/proxy", timeout=5)
+            proxy_list = resp.json().get("data", [])
+            available = [p for p in proxy_list if p.get("status") != "unavailable"]
+            if available:
+                import random
+                selected = random.choice(available)
+                ptype = selected.get("type", "socks5")
+                host = selected.get("host", "")
+                port = selected.get("port", "")
+                user = selected.get("username", "")
+                pwd = selected.get("password", "")
+                if user and pwd:
+                    proxy = f"{ptype}://{user}:{pwd}@{host}:{port}"
+                else:
+                    proxy = f"{ptype}://{host}:{port}"
+        except Exception as e:
+            print(f"[register_outlook_new] 从代理管理获取代理失败: {e}")
+            proxy = ""
 
     print(f"[register_outlook_new] proxy={'yes: ' + proxy[:30] + '...' if proxy else 'NONE'}, count={count}")
 
