@@ -595,9 +595,14 @@ async def run(args, worker_id=0, save_lock=None):
                 await asyncio.sleep(1)
                 if acct and acct.get("email"):
                     acct["profile_id"] = pid
-                    # 窗口改名为邮箱用户名（方便后续找）
+                    # 窗口改名=邮箱，备注=账户信息
                     try:
-                        bb._call("update_profile", int(pid), name=acct["email"].replace("@gmail.com", ""))
+                        from ixbrowser_local_api.entities import Profile as _P
+                        up = _P()
+                        up.profile_id = int(pid)
+                        up.name = acct["email"]
+                        up.note = f"{acct['password']} | {acct.get('phone','')} | {acct.get('name','')}"
+                        bb._call("update_profile", up)
                     except Exception:
                         pass
                 elif args.delete_window:
