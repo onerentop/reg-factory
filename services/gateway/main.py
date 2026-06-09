@@ -361,17 +361,21 @@ _CONFIG_URL = os.getenv("CONFIG_SERVICE_URL", "http://localhost:8003")
 
 async def _proxy_request(request: Request, target_base: str, path: str) -> dict:
     """通用代理转发。"""
-    async with _httpx.AsyncClient(timeout=30) as client:
-        url = f"{target_base}{path}"
-        body = await request.body()
-        resp = await client.request(
-            method=request.method,
-            url=url,
-            content=body if body else None,
-            headers={"Content-Type": request.headers.get("Content-Type", "application/json")},
-            params=dict(request.query_params),
-        )
-        return resp.json()
+    try:
+        async with _httpx.AsyncClient(timeout=30) as client:
+            url = f"{target_base}{path}"
+            body = await request.body()
+            resp = await client.request(
+                method=request.method,
+                url=url,
+                content=body if body else None,
+                headers={"Content-Type": request.headers.get("Content-Type", "application/json")},
+                params=dict(request.query_params),
+            )
+            return resp.json()
+    except Exception as e:
+        print(f"[proxy] ERROR {request.method} {target_base}{path}: {e}")
+        raise
 
 
 @app.api_route("/sms/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
