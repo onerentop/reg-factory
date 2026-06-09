@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams } from 'react-router-dom'
 import { Table, Tag, Button, Space, Input, Select, Modal, message, Steps, Alert, InputNumber, Spin } from 'antd'
 import {
@@ -37,10 +37,13 @@ export default function AccountsPage() {
   const [registering, setRegistering] = useState(false)
   const [taskId, setTaskId] = useState<string | null>(null)
   const [taskStatus, setTaskStatus] = useState<string>('')
+  const [logLines, setLogLines] = useState<string[]>([])
+  const logRef = useRef<HTMLDivElement>(null)
 
   const handleStartRegister = async () => {
     setRegistering(true)
     setTaskStatus('正在提交任务...')
+    setLogLines([])
     try {
       const resp = await fetch('/api/register/outlook', {
         method: 'POST',
@@ -49,9 +52,12 @@ export default function AccountsPage() {
       })
       const data = await resp.json()
       if (data.data?.task_id) {
-        setTaskId(data.data.task_id)
-        setTaskStatus(`任务已提交 (${data.data.task_id.slice(0, 8)}...)，正在注册...`)
-        pollTaskResult(data.data.task_id)
+        const tid = data.data.task_id
+        setTaskId(tid)
+        setTaskStatus(`任务已提交，正在注册...`)
+        setLogLines(prev => [...prev, `[任务] 已提交 (${tid.slice(0, 8)}...)`])
+        connectLogWebSocket(tid)
+        pollTaskResult(tid)
       } else {
         setRegistering(false)
         message.error('提交失败')
@@ -61,6 +67,35 @@ export default function AccountsPage() {
       message.error('请求失败，检查 Gateway 是否运行')
     }
   }
+
+  const connectLogWebSocket = (tid: string) => {
+    const wsUrl = `ws://${window.location.hostname}:8000/ws/task/${tid}/logs`
+    const ws = new WebSocket(wsUrl)
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data)
+        if (data.type === 'log' && data.message) {
+          setLogLines(prev => {
+            const next = [...prev, data.message]
+            return next.slice(-200)
+          })
+        }
+        if (data.type === 'done') {
+          ws.close()
+        }
+      } catch {
+        setLogLines(prev => [...prev, event.data])
+      }
+    }
+    ws.onerror = () => {}
+    ws.onclose = () => {}
+  }
+
+  useEffect(() => {
+    if (logRef.current) {
+      logRef.current.scrollTop = logRef.current.scrollHeight
+    }
+  }, [logLines])
 
   const pollTaskResult = (tid: string) => {
     const interval = setInterval(async () => {
@@ -75,28 +110,27 @@ export default function AccountsPage() {
           const results = result.results || []
           const successCount = results.filter((r: any) => r.success).length
           if (successCount > 0) {
-            setRegisterVisible(false)
             const emails = results.filter((r: any) => r.success).map((r: any) => r.email).join(', ')
             message.success(`注册成功！${emails}`)
-            setTaskStatus(`成功: ${emails}`)
+            setTaskStatus(`✅ 成功: ${emails}`)
+            setLogLines(prev => [...prev, `🎉 注册成功: ${emails}`])
             fetchAccounts()
           } else {
             const failedStep = results[0]?.steps?.find((s: any) => !s.success)
-            const errorMsg = failedStep?.error || '注册失败，请检查代理和 ixBrowser'
+            const errorMsg = failedStep?.error || '注册失败'
             message.error(`注册失败: ${errorMsg}`)
-            setTaskStatus(`失败: ${errorMsg}`)
+            setTaskStatus(`❌ 失败: ${errorMsg}`)
+            setLogLines(prev => [...prev, `💥 失败: ${errorMsg}`])
           }
         } else if (status === 'FAILURE') {
           clearInterval(interval)
           setRegistering(false)
-          message.error(`注册失败: ${data.data?.error || '未知错误'}`)
-          setTaskStatus('失败')
+          message.error(`任务异常: ${data.data?.error || '未知'}`)
+          setTaskStatus('任务异常')
         } else {
           setTaskStatus(`状态: ${status}...`)
         }
-      } catch {
-        // keep polling
-      }
+      } catch {}
     }, 5000)
   }
 
@@ -343,12 +377,13 @@ export default function AccountsPage() {
       <Modal
         title="新建 Outlook 注册"
         open={registerVisible}
-        onCancel={() => { if (!registering) setRegisterVisible(false) }}
-        footer={null}
+        onCancel={() => { if (!registering) { setRegisterVisible(false); setLogLines([]) } }}
+        footer={registering ? null : undefined}
         closable={!registering}
         maskClosable={!registering}
+        width={700}
       >
-        {!registering ? (
+        {!registering && logLines.length === 0 ? (
           <div>
             <div style={{ marginBottom: 16 }}>
               <label style={{ display: 'block', marginBottom: 8 }}>注册数量：</label>
@@ -362,12 +397,49 @@ export default function AccountsPage() {
             </Button>
           </div>
         ) : (
-          <div style={{ textAlign: 'center', padding: '24px 0' }}>
-            <Spin indicator={<LoadingOutlined style={{ fontSize: 36 }} spin />} />
-            <div style={{ marginTop: 16, color: 'var(--text-secondary)' }}>{taskStatus}</div>
-            <div style={{ marginTop: 8, fontSize: 12, color: 'var(--text-secondary)' }}>
-              注册过程需要 2-5 分钟，请勿关闭页面
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+              {registering && <Spin indicator={<LoadingOutlined style={{ fontSize: 18 }} spin />} />}
+              <span style={{ color: registering ? 'var(--accent)' : 'var(--text-primary)', fontWeight: 600 }}>
+                {taskStatus}
+              </span>
             </div>
+            <div
+              ref={logRef}
+              style={{
+                background: '#1e1e1e',
+                color: '#d4d4d4',
+                fontFamily: 'Consolas, Monaco, "Courier New", monospace',
+                fontSize: 12,
+                lineHeight: 1.6,
+                padding: 12,
+                borderRadius: 8,
+                height: 360,
+                overflowY: 'auto',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-all',
+              }}
+            >
+              {logLines.length === 0 ? (
+                <span style={{ color: '#666' }}>等待日志...</span>
+              ) : (
+                logLines.map((line, i) => (
+                  <div key={i} style={{
+                    color: line.includes('OK') || line.includes('成功') || line.includes('🎉') ? '#4ec9b0' :
+                           line.includes('error') || line.includes('失败') || line.includes('💥') || line.includes('Error') ? '#f44747' :
+                           line.includes('WARN') || line.includes('⚠') ? '#cca700' :
+                           '#d4d4d4',
+                  }}>
+                    {line}
+                  </div>
+                ))
+              )}
+            </div>
+            {!registering && (
+              <div style={{ marginTop: 12, textAlign: 'right' }}>
+                <Button onClick={() => { setRegisterVisible(false); setLogLines([]) }}>关闭</Button>
+              </div>
+            )}
           </div>
         )}
       </Modal>

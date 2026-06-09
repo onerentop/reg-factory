@@ -80,6 +80,10 @@ def register_outlook_new(self, count: int = 1, proxy: str = "", config: dict = N
 
     print(f"[register_outlook_new] proxy={'yes: ' + proxy[:30] + '...' if proxy else 'NONE'}, count={count}")
 
+    from worker.log_capture import LogCapture
+    task_id = self.request.id or "unknown"
+    capture = LogCapture(task_id=task_id, redis_url=redis_url).start()
+
     async def _run():
         import httpx
         results = []
@@ -124,7 +128,10 @@ def register_outlook_new(self, count: int = 1, proxy: str = "", config: dict = N
             })
         return {"count": count, "results": results}
 
-    return asyncio.run(_run())
+    try:
+        return asyncio.run(_run())
+    finally:
+        capture.stop()
 
 
 @celery_app.task(name="register_account", bind=True)
