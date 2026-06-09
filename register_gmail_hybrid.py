@@ -411,39 +411,16 @@ async def browser_phone_and_finalize(page, profile, ctx=None, profile_id=None):
     final_url = page.url
     log(f"[finalize] 终止页: {final_url[:75]}")
 
-    # unknownerror 可重试（点"下一步"按钮可能回到条款页重新建号）
-    if "unknownerror" in final_url:
-        log("[finalize] Google 报 unknownerror，尝试重试...")
-        for retry in range(3):
-            await click_next(page)  # 点 unknownerror 页的"下一步"
-            await asyncio.sleep(5)
-            cur = page.url
-            if "unknownerror" not in cur and "termsofservice" not in cur:
-                log(f"[finalize] 重试后跳转: {cur[:70]}")
-                break
-            if "termsofservice" in cur:
-                # 回到条款页，再点"我同意"
-                try:
-                    await page.keyboard.press("End")
-                    await asyncio.sleep(1)
-                    b = page.locator('button:has-text("我同意")').last
-                    if await b.count() and await b.is_visible():
-                        await b.click(timeout=5000)
-                        log(f"[finalize] 重试点击 [我同意] (第{retry+1}次)")
-                except Exception:
-                    pass
-                for _w in range(40):
-                    if page.url != cur: break
-                    await asyncio.sleep(1.5)
-
-    # 最终判定：即使 unknownerror，账号也可能已建成（SMTP 验证）
+    # unknownerror 是结构性的（缺 DroidGuard），但账号已建成。直接 SMTP 验证。
     final_url = page.url
     acct_email = email or f"{profile.get('username','?')}@gmail.com"
+    if "unknownerror" in final_url:
+        log("[finalize] unknownerror（正常，缺 DroidGuard），SMTP 验证账号...")
     done = smtp_verify(acct_email)
     if done:
         log(f"[finalize] SMTP 确认账号存在: {acct_email}", "OK")
-    elif "unknownerror" not in final_url and ("signup" not in final_url or "o/android/auth" in final_url):
-        done = True  # URL 跳走 + SMTP 暂不可用时信任 URL
+    elif "unknownerror" not in final_url and "signup" not in final_url:
+        done = True
     else:
         log(f"[finalize] 账号未建成(SMTP 550)，终止页: {final_url[:70]}", "WARN")
     acct = {
