@@ -1318,8 +1318,15 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False):
             print(f"  {tag} verification failed, discarding account")
             return None, None
 
+        # 提取 Graph API refresh_token（用于免密码收发邮件）
+        graph = None
+        try:
+            graph = await extract_graph_token(page, context, email, password, idx)
+        except Exception as e:
+            print(f"  {tag} [graph] extraction error: {e}")
+
         print(f"  {tag} OK: {email} / {password}")
-        return email, password
+        return email, password, graph  # 调用方用 result = await register_outlook(...)，result[2] = graph
 
     except Exception as e:
         print(f"  {tag} FAILED: {e}")
@@ -1722,14 +1729,17 @@ async def _register_one_headless(idx, proxy_str):
             await page.route("**/*", _block_heavy_resources)
 
             # Abort early when captcha solvers fail so auto-mode falls back to ixBrowser fast
-            email, password = await register_outlook(page, context, idx, captcha_early_abort=True)
+            result = await register_outlook(page, context, idx, captcha_early_abort=True)
+            email = result[0] if result else None
+            password = result[1] if result and len(result) > 1 else None
+            graph = result[2] if result and len(result) > 2 else None
 
             try:
                 await browser.close()
             except Exception:
                 pass
 
-            return email, password
+            return email, password, graph
 
     except Exception as e:
         print(f"  {tag} error: {e}")
@@ -1789,9 +1799,12 @@ async def _register_one_browser(bb, idx, proxy_str):
             # NOTE: resource blocking intentionally disabled in browser mode.
             # PerimeterX behavioral analysis can detect modified network patterns.
             # Bandwidth saving via resource blocking only applies in headless mode.
-            email, password = await register_outlook(page, context, idx)
+            result = await register_outlook(page, context, idx)
+            email = result[0] if result else None
+            password = result[1] if result and len(result) > 1 else None
+            graph = result[2] if result and len(result) > 2 else None
 
-        return email, password
+        return email, password, graph
 
     except Exception as e:
         print(f"  {tag} error: {e}")
@@ -1818,7 +1831,7 @@ async def register_one(bb, idx, proxy_str, results, results_lock, live_fh=None, 
       mode="browser"  — ixBrowser full GUI, highest traffic, most reliable
     """
     tag = f"[#{idx}]"
-    email, password = None, None
+    email, password, graph = None, None, None
     used_mode = None
 
     try:
@@ -1833,15 +1846,17 @@ async def register_one(bb, idx, proxy_str, results, results_lock, live_fh=None, 
                 used_mode = "protocol"
 
         # ── 2. Headless mode (~70% less traffic than browser) ────
-        # Use shorter timeout so we fall back to browser faster on captcha stall
         HEADLESS_TIMEOUT = min(REGISTER_TIMEOUT, 180)
         if not email and mode in ("auto", "headless"):
             print(f"  {tag} [2/3] headless mode (timeout={HEADLESS_TIMEOUT}s)...")
             try:
-                email, password = await asyncio.wait_for(
+                result = await asyncio.wait_for(
                     _register_one_headless(idx, proxy_str),
                     timeout=HEADLESS_TIMEOUT,
                 )
+                email = result[0] if result else None
+                password = result[1] if result and len(result) > 1 else None
+                graph = result[2] if result and len(result) > 2 else None
             except asyncio.TimeoutError:
                 print(f"  {tag} headless timeout → falling back to browser")
             if email:
@@ -1851,10 +1866,13 @@ async def register_one(bb, idx, proxy_str, results, results_lock, live_fh=None, 
         if not email and mode in ("auto", "browser"):
             print(f"  {tag} [3/3] browser mode (ixBrowser)...")
             try:
-                email, password = await asyncio.wait_for(
+                result = await asyncio.wait_for(
                     _register_one_browser(bb, idx, proxy_str),
                     timeout=REGISTER_TIMEOUT,
                 )
+                email = result[0] if result else None
+                password = result[1] if result and len(result) > 1 else None
+                graph = result[2] if result and len(result) > 2 else None
             except asyncio.TimeoutError:
                 print(f"  {tag} browser timeout")
             if email:
@@ -1869,6 +1887,7 @@ async def register_one(bb, idx, proxy_str, results, results_lock, live_fh=None, 
             results.append({
                 "index": idx, "email": email, "password": password,
                 "status": "OK", "proxy": proxy_str, "mode": used_mode,
+                "graph": graph,
             })
             if live_fh:
                 live_fh.write(f"{email}----{password}\n")
