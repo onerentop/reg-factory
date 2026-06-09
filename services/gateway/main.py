@@ -286,17 +286,19 @@ async def _proxy_request(request: Request, target_base: str, path: str) -> dict:
         return resp.json()
 
 
-@app.api_route("/api/sms/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
+@app.api_route("/sms/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
 async def proxy_sms(request: Request, path: str):
     return await _proxy_request(request, _SMS_URL, f"/sms/{path}")
 
 
-@app.api_route("/api/accounts/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
-async def proxy_accounts(request: Request, path: str):
-    return await _proxy_request(request, _ACCOUNT_URL, f"/accounts/{path}")
+@app.api_route("/accounts", methods=["GET", "POST"])
+@app.api_route("/accounts/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
+async def proxy_accounts(request: Request, path: str = ""):
+    target = f"/accounts/{path}" if path else "/accounts"
+    return await _proxy_request(request, _ACCOUNT_URL, target)
 
 
-@app.api_route("/api/config/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
+@app.api_route("/config/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
 async def proxy_config(request: Request, path: str):
     return await _proxy_request(request, _CONFIG_URL, f"/config/{path}")
 
