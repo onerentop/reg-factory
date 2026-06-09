@@ -98,6 +98,7 @@ class IXBrowserProvider(BrowserProvider):
         if "@" not in proxy_str and "," in proxy_str:
             proxy_str = proxy_str.replace(",", "@", 1)
 
+        # user:pass@host:port
         match = re.match(r'^(.+):(.+)@(.+):(\d+)$', proxy_str)
         if match:
             return {
@@ -107,6 +108,17 @@ class IXBrowserProvider(BrowserProvider):
                 "host": match.group(3),
                 "port": match.group(4),
             }
+        # host:port:user:pass (1024proxy 格式，默认 socks5)
+        match3 = re.match(r'^([^:]+):(\d+):(.+):([^:]+)$', proxy_str)
+        if match3:
+            return {
+                "type": proxy_type if proxy_type != "http" else "socks5",
+                "host": match3.group(1),
+                "port": match3.group(2),
+                "username": match3.group(3),
+                "password": match3.group(4),
+            }
+        # host:port
         match2 = re.match(r'^(.+):(\d+)$', proxy_str)
         if match2:
             return {"type": proxy_type, "host": match2.group(1), "port": match2.group(2)}
