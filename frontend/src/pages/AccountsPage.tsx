@@ -214,6 +214,16 @@ export default function AccountsPage() {
 
   const columns = [
     {
+      title: '#',
+      key: 'index',
+      width: 50,
+      render: (_: any, __: any, index: number) => (
+        <span style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-mono)', fontSize: 12 }}>
+          {(page - 1) * pageSize + index + 1}
+        </span>
+      ),
+    },
+    {
       title: '邮箱',
       dataIndex: 'email',
       key: 'email',
