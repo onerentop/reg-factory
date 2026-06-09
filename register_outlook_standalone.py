@@ -379,7 +379,7 @@ async def inject_arkose_token(page, token):
 
 # Microsoft public client for personal accounts (consumers tenant)
 # Using Outlook Mobile client ID which supports personal accounts
-GRAPH_CLIENT_ID = "27922004-5251-4030-b22d-91ecd9a37ea4"
+GRAPH_CLIENT_ID = "9e5f94bc-e8a4-4e73-b8be-63364c29d753"
 GRAPH_REDIRECT_URI = "https://login.microsoftonline.com/common/oauth2/nativeclient"
 GRAPH_SCOPE = "offline_access https://graph.microsoft.com/Mail.Read https://graph.microsoft.com/Mail.Send https://graph.microsoft.com/User.Read"
 
@@ -402,54 +402,117 @@ async def extract_graph_token(page, context, email, password, idx=0):
             f"&prompt=consent"
         )
         print(f"  {tag} [graph] navigating to OAuth consent...")
+        # 拦截 nativeclient redirect（浏览器会报 chrome-error，但我们只需要 URL 里的 code）
+        captured_code_url = [None]
+        def on_request(request):
+            if "nativeclient" in request.url and "code=" in request.url:
+                captured_code_url[0] = request.url
+        page.on("request", on_request)
+
         await page.goto(auth_url, timeout=30000, wait_until="domcontentloaded")
         await asyncio.sleep(3)
 
-        # May need to click accept/consent buttons
-        for attempt in range(15):
-            current_url = page.url
-            # Check if redirected with auth code
-            if GRAPH_REDIRECT_URI in current_url and "code=" in current_url:
+        logged_in = False
+        for attempt in range(20):
+            current_url = captured_code_url[0] or page.url
+            if "code=" in current_url:
                 break
 
-            # Click accept/yes/consent buttons
-            for sel in [
-                '#idBtn_Accept', 'input[id="idBtn_Accept"]',
-                'button:has-text("Accept")', 'button:has-text("Yes")',
-                'button:has-text("Accepter")', 'button:has-text("同意")',
-                'input[type="submit"][value="Yes"]',
-                'input[type="submit"][value="Accept"]',
-                'input[type="submit"]', 'button[type="submit"]',
-            ]:
-                btn = page.locator(sel).first
-                if await btn.count() > 0:
-                    try:
+            # 1. 邮箱输入页（先于密码）
+            email_input = page.locator('input[type="email"], input[name="loginfmt"], input#usernameEntry, input#identifierId').first
+            if not logged_in and await email_input.count() > 0 and await email_input.is_visible():
+                try:
+                    await email_input.fill(email, timeout=3000)
+                    await page.locator('#idSIButton9, button[type="submit"]').first.click(timeout=3000)
+                    print(f"  {tag} [graph] entered email")
+                    await asyncio.sleep(4)
+                    continue
+                except Exception:
+                    pass
+
+            # 2. passkey 页面 → 切换到密码登录
+            #    德语: "Ihr Kennwort verwenden"  英语: "Use your password"  中文: "使用密码"
+            for pw_sel in ['#idA_PWD_SwitchToPassword', ':has-text("Kennwort verwenden")',
+                           ':has-text("Use your password")', ':has-text("使用密码")',
+                           ':has-text("password"):not(input)', ':has-text("Kennwort"):not(input)']:
+                try:
+                    lnk = page.locator(pw_sel).last
+                    if await lnk.count() > 0 and await lnk.is_visible():
+                        await lnk.click(timeout=3000)
+                        print(f"  {tag} [graph] switched to password mode")
+                        await asyncio.sleep(4)
+                        break
+                except Exception:
+                    continue
+
+            # 3. 密码输入页
+            await asyncio.sleep(1)
+            pwd_input = page.locator('input[type="password"], input[name="passwd"], input#passwordEntry').first
+            if not logged_in and await pwd_input.count() > 0 and await pwd_input.is_visible():
+                try:
+                    await pwd_input.fill(password, timeout=3000)
+                    await page.locator('#idSIButton9, button[type="submit"]').first.click(timeout=3000)
+                    print(f"  {tag} [graph] entered password")
+                    logged_in = True
+                    await asyncio.sleep(4)
+                    continue
+                except Exception:
+                    pass
+
+            # 4. 跳过中间页（passkey 注册提示/安全提示）→ 点 Skip/Cancel
+            for sel in ['#iCancel', '#idBtn_Back', 'button:has-text("Skip")', 'button:has-text("Cancel")',
+                        'button:has-text("跳过")', 'button:has-text("暂不")', 'button:has-text("Not now")',
+                        'a:has-text("Skip")', 'a:has-text("跳过")']:
+                try:
+                    btn = page.locator(sel).first
+                    if await btn.count() > 0 and await btn.is_visible():
+                        await btn.click(timeout=3000)
+                        print(f"  {tag} [graph] skip: {sel}")
+                        await asyncio.sleep(3)
+                        break
+                except Exception:
+                    continue
+
+            # 5. "保持登录"提示 → 点 Yes
+            for sel in ['#idSIButton9', '#idBtn_Accept', '#acceptButton',
+                        'button:has-text("Yes")', 'button:has-text("是")']:
+                try:
+                    btn = page.locator(sel).first
+                    if await btn.count() > 0 and await btn.is_visible():
                         await btn.click(timeout=3000)
                         print(f"  {tag} [graph] clicked: {sel}")
                         await asyncio.sleep(3)
                         break
-                    except Exception:
-                        pass
+                except Exception:
+                    continue
 
-            # Login if needed (shouldn't be since we just registered)
-            pwd_input = page.locator('input[type="password"]').first
-            if await pwd_input.count() > 0:
-                await pwd_input.fill(password)
-                await page.keyboard.press("Enter")
-                await asyncio.sleep(3)
-
-            email_input = page.locator('input[type="email"], input[name="loginfmt"]').first
-            if await email_input.count() > 0:
-                await email_input.fill(email)
-                await page.keyboard.press("Enter")
-                await asyncio.sleep(3)
+            # 6. OAuth 授权同意页 → 点 Accept/Annehmen（德语）
+            for sel in ['button:has-text("Annehmen")', 'button:has-text("Accept")',
+                        'button:has-text("同意")', 'button:has-text("Yes")',
+                        'input[value="Accept"]', 'input[value="Yes"]',
+                        '#idBtn_Accept', 'input[type="submit"]']:
+                try:
+                    btn = page.locator(sel).first
+                    if await btn.count() > 0 and await btn.is_visible():
+                        await btn.click(timeout=3000)
+                        print(f"  {tag} [graph] consent: {sel}")
+                        await asyncio.sleep(3)
+                        break
+                except Exception:
+                    continue
 
             await asyncio.sleep(2)
 
-        current_url = page.url
+        # nativeclient redirect 会导致 chrome-error，用拦截到的 URL
+        current_url = captured_code_url[0] or page.url
+        if "code=" not in current_url:
+            # 也从 frame URL 里找
+            for frame in page.frames:
+                if "code=" in frame.url:
+                    current_url = frame.url
+                    break
         if "code=" not in current_url:
             print(f"  {tag} [graph] no auth code in URL: {current_url[:80]}")
-            await page.screenshot(path=f"{SCREENSHOT_DIR}/outlook_{idx}_graph_fail.png")
             return None
 
         # Extract authorization code
