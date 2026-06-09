@@ -1,7 +1,6 @@
 import pytest
-from worker.browser_pool import (
-    BrowserPool, PlaywrightProvider, ProxyConfig, FingerprintConfig, ProfileHandle,
-)
+from worker.browser_pool import BrowserPool
+from shared.browser_providers import PlaywrightProvider, ProxyConfig, FingerprintConfig, ProfileHandle
 
 
 @pytest.fixture

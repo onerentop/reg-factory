@@ -2,8 +2,10 @@ import React, { createContext, useContext, useState, useEffect } from 'react'
 import type { ThemeTokens } from './tokens'
 import { lightTheme } from './themes/light'
 import { darkTheme } from './themes/dark'
+import { cyberpunkTheme } from './themes/cyberpunk'
+import { terminalTheme } from './themes/terminal'
 
-type ThemeName = 'light' | 'dark'
+type ThemeName = 'light' | 'dark' | 'cyberpunk' | 'terminal'
 
 interface ThemeContextValue {
   theme: ThemeName
@@ -11,7 +13,7 @@ interface ThemeContextValue {
   tokens: ThemeTokens
 }
 
-const themes: Record<ThemeName, ThemeTokens> = { light: lightTheme, dark: darkTheme }
+const themes: Record<ThemeName, ThemeTokens> = { light: lightTheme, dark: darkTheme, cyberpunk: cyberpunkTheme, terminal: terminalTheme }
 
 const ThemeContext = createContext<ThemeContextValue>({
   theme: 'light',

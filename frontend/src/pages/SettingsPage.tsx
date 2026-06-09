@@ -87,6 +87,8 @@ function ThemeTab() {
   const themes = [
     { key: 'light', label: '☀️ 亮色', color: '#f8fafc' },
     { key: 'dark', label: '🌙 暗色', color: '#0f172a' },
+    { key: 'cyberpunk', label: '💜 赛博紫', color: '#0f0a2a' },
+    { key: 'terminal', label: '🌿 终端绿', color: '#052e16' },
   ]
 
   return (
@@ -95,7 +97,7 @@ function ThemeTab() {
         {themes.map(t => (
           <div
             key={t.key}
-            onClick={() => setTheme(t.key as 'light' | 'dark')}
+            onClick={() => setTheme(t.key as 'light' | 'dark' | 'cyberpunk' | 'terminal')}
             style={{
               width: 80, height: 80, borderRadius: 12,
               background: t.color, border: theme === t.key ? '3px solid var(--accent)' : '2px solid var(--border)',
