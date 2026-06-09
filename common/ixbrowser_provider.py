@@ -149,6 +149,12 @@ class IXBrowserProvider(BrowserProvider):
             proxy.change_to_custom_mode(proxy_type="direct")
         profile.proxy_config = proxy
 
+        profile.set_preference_config({
+            "block_password_pages": 0,      # 禁用"保存密码"弹窗
+            "block_restore_pages": 0,       # 禁用"恢复页面"弹窗
+            "block_notification_pages": 0,  # 禁用通知弹窗
+        })
+
         result = self._call("create_profile", profile)
         pid = result.get("profile_id") if isinstance(result, dict) else result
         print(f"  ixBrowser 窗口已创建: {name} (ID: {pid})")
