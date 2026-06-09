@@ -1,7 +1,30 @@
 import os
+import random
 from celery import Celery
 
 redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+
+
+def _fetch_proxy_from_manager() -> str:
+    """从 Gateway 代理管理获取一个激活的代理，格式化为 URL。"""
+    import requests as _req
+    try:
+        resp = _req.get("http://localhost:8000/proxy", timeout=5)
+        proxy_list = resp.json().get("data", [])
+        available = [p for p in proxy_list if p.get("status") in ("active", "available")]
+        if available:
+            selected = random.choice(available)
+            ptype = selected.get("type", "socks5")
+            host = selected.get("host", "")
+            port = selected.get("port", "")
+            user = selected.get("username", "")
+            pwd = selected.get("password", "")
+            if user and pwd:
+                return f"{ptype}://{user}:{pwd}@{host}:{port}"
+            return f"{ptype}://{host}:{port}"
+    except Exception:
+        pass
+    return ""
 
 celery_app = Celery(
     "reg_worker",
@@ -61,38 +84,18 @@ def cleanup_old_logs():
 def register_outlook_new(self, count: int = 1, proxy: str = "", config: dict = None):
     """从前端触发的 Outlook 新账号注册。自动生成邮箱，从代理管理获取代理。"""
     import asyncio
-    import random
     from worker.step_engine import FlowRegistry
     from worker.legacy_bridge import LegacyBridge
 
     bridge = LegacyBridge()
     bridge.ensure_importable()
     try:
-        import config as _legacy_config  # noqa: F401 — 触发 .env 加载
+        import config as _legacy_config  # noqa: F401
     except Exception:
         pass
 
     if not proxy:
-        import requests as _req
-        try:
-            resp = _req.get("http://localhost:8000/proxy", timeout=5)
-            proxy_list = resp.json().get("data", [])
-            available = [p for p in proxy_list if p.get("status") in ("active", "available")]
-            if available:
-                import random
-                selected = random.choice(available)
-                ptype = selected.get("type", "socks5")
-                host = selected.get("host", "")
-                port = selected.get("port", "")
-                user = selected.get("username", "")
-                pwd = selected.get("password", "")
-                if user and pwd:
-                    proxy = f"{ptype}://{user}:{pwd}@{host}:{port}"
-                else:
-                    proxy = f"{ptype}://{host}:{port}"
-        except Exception as e:
-            print(f"[register_outlook_new] 从代理管理获取代理失败: {e}")
-            proxy = ""
+        proxy = _fetch_proxy_from_manager()
 
     print(f"[register_outlook_new] proxy={'yes: ' + proxy[:30] + '...' if proxy else 'NONE'}, count={count}")
 
@@ -158,34 +161,14 @@ def register_outlook_new(self, count: int = 1, proxy: str = "", config: dict = N
 
 @celery_app.task(name="register_account", bind=True)
 def register_account(self, platform: str, email: str, config: dict):
-    """注册账户的 Celery 任务入口。同步包装异步流程。"""
+    """通用注册任务。所有平台走代理管理获取代理。"""
     import asyncio
     from worker.step_engine import FlowRegistry
 
-    async def _run():
-        # 通过代理分配策略选择代理
-        proxy_config = config.get("proxy")
-        if not proxy_config:
-            try:
-                import httpx as _hx
-                resp = _hx.get(
-                    config.get("gateway_url", "http://localhost:8000") + "/proxy",
-                    timeout=5,
-                )
-                proxies = resp.json().get("data", [])
-                available = [p for p in proxies if p.get("status") != "unavailable"]
-                if available:
-                    from gateway.proxy_manager import ALLOCATOR_MAP
-                    strategy_name = config.get("proxy_strategy", "round_robin")
-                    allocator_cls = ALLOCATOR_MAP.get(strategy_name, ALLOCATOR_MAP["round_robin"])
-                    allocator = allocator_cls()
-                    selected = allocator.select(available)
-                    if selected:
-                        proxy_config = selected
-            except Exception:
-                pass
-        context = {"email": email, "proxy": proxy_config, **config}
+    proxy = config.get("proxy", "") or _fetch_proxy_from_manager()
+    context = {"email": email, "proxy": proxy, **config}
 
+    async def _run():
         flow = FlowRegistry.get(platform)
         results = await flow.run(context)
         return [

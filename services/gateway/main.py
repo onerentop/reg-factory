@@ -470,8 +470,26 @@ async def extract_graph_token_api(body: dict):
 
     import os
     if not os.environ.get("HTTPS_PROXY"):
-        os.environ.setdefault("HTTPS_PROXY", "http://127.0.0.1:7897")
-        os.environ.setdefault("HTTP_PROXY", "http://127.0.0.1:7897")
+        proxy_for_token = ""
+        try:
+            async with _httpx.AsyncClient(timeout=5) as _pc:
+                _pr = await _pc.get("http://localhost:8000/proxy")
+                _pl = _pr.json().get("data", [])
+                _active = [p for p in _pl if p.get("status") in ("active", "available")]
+                if _active:
+                    _s = _active[0]
+                    _u = _s.get("username", "")
+                    _pw = _s.get("password", "")
+                    _auth = f"{_u}:{_pw}@" if _u and _pw else ""
+                    proxy_for_token = f"{_s.get('type','socks5')}://{_auth}{_s['host']}:{_s['port']}"
+        except Exception:
+            pass
+        if proxy_for_token:
+            os.environ["HTTPS_PROXY"] = proxy_for_token
+            os.environ["HTTP_PROXY"] = proxy_for_token
+        else:
+            os.environ.setdefault("HTTPS_PROXY", "http://127.0.0.1:7897")
+            os.environ.setdefault("HTTP_PROXY", "http://127.0.0.1:7897")
 
     from extract_graph_tokens import get_graph_token
     loop = asyncio.get_event_loop()
