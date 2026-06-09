@@ -53,3 +53,15 @@ class AlertHistory(TimestampMixin, BaseModel):
     rule_type = Column(String(50), nullable=False)
     message = Column(String(500), nullable=False)
     resolved = Column(Boolean, nullable=False, default=False)
+
+
+class ProxyEntry(TimestampMixin, BaseModel):
+    __tablename__ = "proxy_entries"
+
+    type = Column(String(10), nullable=False, default="socks5")
+    host = Column(String(255), nullable=False)
+    port = Column(Integer, nullable=False)
+    username = Column(String(100), nullable=True)
+    password = Column(String(100), nullable=True)
+    status = Column(String(20), nullable=False, default="unknown")
+    region = Column(String(20), nullable=True)
