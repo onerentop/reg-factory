@@ -262,7 +262,7 @@ async def list_proxies(session: AsyncSession = Depends(get_session)):
     proxies = result.scalars().all()
     return ApiResponse(data=[{
         "id": str(p.id), "type": p.type, "host": p.host, "port": p.port,
-        "username": p.username, "status": p.status, "region": p.region,
+        "username": p.username, "password": p.password, "status": p.status,
     } for p in proxies])
 
 
@@ -271,7 +271,7 @@ async def add_proxy(body: dict, session: AsyncSession = Depends(get_session)):
     proxy = ProxyEntry(
         type=body.get("type", "socks5"), host=body["host"], port=int(body["port"]),
         username=body.get("username"), password=body.get("password"),
-        region=body.get("region"), status="unknown",
+        region=body.get("region"), status=body.get("status", "active"),
     )
     session.add(proxy)
     await session.flush()
