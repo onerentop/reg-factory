@@ -112,9 +112,14 @@ def register_outlook_new(self, count: int = 1, proxy: str = "", config: dict = N
                         account_data = create_resp.json().get("data", {})
                         account_id = account_data.get("id")
                         if account_id:
+                            refresh_token = context.get("refresh_token", "")
                             await client.put(f"http://localhost:8002/accounts/{account_id}", json={
                                 "status": "success",
                                 "current_step": len(step_results),
+                                "tokens": {
+                                    "refresh_token": refresh_token,
+                                    "client_id": "9e5f94bc-e8a4-4e73-b8be-63364c29d753",
+                                } if refresh_token else None,
                             })
                     print(f"[register_outlook_new] saved to Account Service: {email}")
                 except Exception as e:
