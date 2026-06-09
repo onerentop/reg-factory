@@ -68,11 +68,17 @@ def register_outlook_new(self, count: int = 1, proxy: str = "", config: dict = N
 
     bridge = LegacyBridge()
     bridge.ensure_importable()
+    try:
+        import config as _legacy_config  # noqa: F401 — 触发 .env 加载
+    except Exception:
+        pass
 
     if not proxy:
         raw = os.environ.get("OUTLOOK_PROXIES", "")
         proxies = [p.strip() for p in raw.replace(",", "\n").splitlines() if p.strip() and not p.strip().startswith("#")]
         proxy = random.choice(proxies) if proxies else ""
+
+    print(f"[register_outlook_new] proxy={'yes: ' + proxy[:30] + '...' if proxy else 'NONE'}, count={count}")
 
     async def _run():
         results = []
