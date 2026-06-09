@@ -1,0 +1,134 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: regfactory
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-regfactory}
+      POSTGRES_DB: regfactory
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U regfactory"]
+      interval: 10s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  gateway:
+    build:
+      context: ./services
+      dockerfile: Dockerfile
+    command: uvicorn gateway.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://regfactory:${POSTGRES_PASSWORD:-regfactory}@postgres:5432/regfactory
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-in-production}
+      ACCOUNT_SERVICE_URL: http://account:8002
+      SMS_SERVICE_URL: http://sms:8001
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  sms:
+    build:
+      context: ./services
+      dockerfile: Dockerfile
+    command: uvicorn sms_service.main:app --host 0.0.0.0 --port 8001
+    ports:
+      - "8001:8001"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://regfactory:${POSTGRES_PASSWORD:-regfactory}@postgres:5432/regfactory
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  account:
+    build:
+      context: ./services
+      dockerfile: Dockerfile
+    command: uvicorn account_service.main:app --host 0.0.0.0 --port 8002
+    ports:
+      - "8002:8002"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://regfactory:${POSTGRES_PASSWORD:-regfactory}@postgres:5432/regfactory
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  config:
+    build:
+      context: ./services
+      dockerfile: Dockerfile
+    command: uvicorn config_service.main:app --host 0.0.0.0 --port 8003
+    ports:
+      - "8003:8003"
+    environment:
+      DATABASE_URL: postgresql+asyncpg://regfactory:${POSTGRES_PASSWORD:-regfactory}@postgres:5432/regfactory
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ./services
+      dockerfile: Dockerfile
+    command: celery -A worker.tasks worker --loglevel=info --pool=gevent --concurrency=10
+    environment:
+      DATABASE_URL: postgresql+asyncpg://regfactory:${POSTGRES_PASSWORD:-regfactory}@postgres:5432/regfactory
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  beat:
+    build:
+      context: ./services
+      dockerfile: Dockerfile
+    command: celery -A worker.tasks beat --loglevel=info
+    environment:
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "3000:80"
+    depends_on:
+      - gateway
+
+volumes:
+  pgdata:
