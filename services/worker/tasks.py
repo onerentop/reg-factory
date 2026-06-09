@@ -32,6 +32,10 @@ celery_app.conf.beat_schedule = {
         "task": "cleanup_old_logs",
         "schedule": crontab(hour=2, minute=0),
     },
+    "planned-registration": {
+        "task": "planned_registration",
+        "schedule": crontab(minute=0, hour="*/6"),
+    },
 }
 
 
@@ -87,5 +91,26 @@ def retry_from_step(self, platform: str, email: str, from_step: int, config: dic
              "error": r.error, "duration_ms": r.duration_ms}
             for r in results
         ]
+
+    return asyncio.run(_run())
+
+
+@celery_app.task(name="planned_registration")
+def planned_registration():
+    """计划注册——按配置自动启动批量注册任务。"""
+    import asyncio
+
+    async def _run():
+        from shared.config_client import ConfigClient
+        client = ConfigClient()
+        await client.load_from_service()
+        plan = client.get("registration.plan", {})
+        if not plan.get("enabled"):
+            return {"status": "skipped", "reason": "plan not enabled"}
+        count = plan.get("count", 5)
+        platform = plan.get("platform", "outlook")
+        for i in range(count):
+            register_account.delay(platform, f"auto_{platform}_{i}", {})
+        return {"status": "queued", "count": count, "platform": platform}
 
     return asyncio.run(_run())

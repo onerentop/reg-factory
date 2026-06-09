@@ -197,6 +197,8 @@ async def create_alert_rule(
         name=body.name, rule_type=body.rule_type, threshold=body.threshold,
         enabled=body.enabled, notify_channels=body.notify_channels,
     )
+    from shared.audit import AuditRecorder
+    AuditRecorder().record(operator="system", action="create_alert_rule", target=body.name)
     return ApiResponse(data={"id": str(rule.id), "name": rule.name})
 
 
@@ -237,6 +239,8 @@ async def add_proxy(body: dict, session: AsyncSession = Depends(get_session)):
     session.add(proxy)
     await session.flush()
     await session.refresh(proxy)
+    from shared.audit import AuditRecorder
+    AuditRecorder().record(operator="system", action="add_proxy", target=body.get("host", ""))
     return ApiResponse(data={"id": str(proxy.id)})
 
 

@@ -62,7 +62,33 @@ class OutlookRegistrationFlow(RegistrationFlow):
         ]
 
     async def execute_step(self, step_number: int, step_name: str, context: dict) -> StepResult:
-        return StepResult(step_number=step_number, name=step_name, success=True)
+        """Outlook 注册步骤执行。实际浏览器操作在此实现。"""
+        email = context.get("email", "")
+
+        if step_name == "Create email":
+            # TODO: 接入 Playwright 填写邮箱表单
+            return StepResult(step_number=step_number, name=step_name, success=True,
+                            data={"email": email})
+
+        elif step_name == "Set password":
+            # TODO: 接入 Playwright 设置密码
+            return StepResult(step_number=step_number, name=step_name, success=True)
+
+        elif step_name == "Fill birthday":
+            # TODO: 接入 Playwright 填写生日
+            return StepResult(step_number=step_number, name=step_name, success=True)
+
+        elif step_name == "Solve captcha":
+            # TODO: 接入 Arkose Labs 验证码处理
+            return StepResult(step_number=step_number, name=step_name, success=True)
+
+        elif step_name == "Complete registration":
+            # TODO: 提取 Cookie/Token 并保存
+            return StepResult(step_number=step_number, name=step_name, success=True,
+                            data={"status": "registered"})
+
+        return StepResult(step_number=step_number, name=step_name, success=False,
+                         error=f"Unknown step: {step_name}")
 
 
 class GmailRegistrationFlow(RegistrationFlow):
@@ -80,7 +106,44 @@ class GmailRegistrationFlow(RegistrationFlow):
         ]
 
     async def execute_step(self, step_number: int, step_name: str, context: dict) -> StepResult:
-        return StepResult(step_number=step_number, name=step_name, success=True)
+        """Gmail 注册步骤执行。混合方案：浏览器铸 BotGuard + HTTP 手机验证。"""
+        email = context.get("email", "")
+
+        if step_name == "Fill name":
+            # TODO: 接入 Playwright 或 HTTP batchexecute 填写姓名
+            return StepResult(step_number=step_number, name=step_name, success=True)
+
+        elif step_name == "Set birthday":
+            # TODO: BotGuard token 铸造 + 填写生日
+            return StepResult(step_number=step_number, name=step_name, success=True)
+
+        elif step_name == "Choose username":
+            # TODO: 用户名可用性检查 + 填写
+            return StepResult(step_number=step_number, name=step_name, success=True,
+                            data={"username": email.split("@")[0] if email else ""})
+
+        elif step_name == "Set password":
+            # TODO: 设置密码
+            return StepResult(step_number=step_number, name=step_name, success=True)
+
+        elif step_name == "Phone verification":
+            # TODO: 调用 SMS Service 获取号码 + 轮询验证码
+            # sms_response = await http_client.post(SMS_SERVICE_URL + "/sms/number/acquire", ...)
+            # code = await http_client.get(SMS_SERVICE_URL + f"/sms/number/{order_id}/code", ...)
+            return StepResult(step_number=step_number, name=step_name, success=True,
+                            data={"phone_verified": True})
+
+        elif step_name == "Accept terms":
+            # TODO: 接受服务条款
+            return StepResult(step_number=step_number, name=step_name, success=True)
+
+        elif step_name == "Complete registration":
+            # TODO: 完成注册 + 保存 Cookie
+            return StepResult(step_number=step_number, name=step_name, success=True,
+                            data={"status": "registered"})
+
+        return StepResult(step_number=step_number, name=step_name, success=False,
+                         error=f"Unknown step: {step_name}")
 
 
 class FlowRegistry:
