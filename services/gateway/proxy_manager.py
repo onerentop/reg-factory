@@ -90,12 +90,32 @@ async def check_proxy_health(host: str, port: int, proxy_type: str = "socks5", t
                     resp = await client.get(url)
                     if resp.status_code < 400:
                         elapsed = resp.elapsed.total_seconds() if hasattr(resp, 'elapsed') else 0
-                        return "slow" if elapsed > 3 else "available"
+                        return "slow" if elapsed > 5 else "available"
                 except Exception:
                     continue
     except Exception as e:
         logger.debug(f"Proxy {host}:{port} check failed: {e}")
     return "unavailable"
+
+
+async def detect_proxy_ip(host: str, port: int, proxy_type: str = "socks5", timeout: float = 10.0, username: str = None, password: str = None) -> dict:
+    """检测代理出口 IP 和地区。"""
+    if username and password:
+        proxy_url = f"{proxy_type}://{username}:{password}@{host}:{port}"
+    else:
+        proxy_url = f"{proxy_type}://{host}:{port}"
+    try:
+        async with httpx.AsyncClient(proxy=proxy_url, timeout=timeout) as client:
+            resp = await client.get("http://ip-api.com/json/?fields=query,country,countryCode,regionName,city")
+            if resp.status_code == 200:
+                data = resp.json()
+                return {
+                    "ip": data.get("query", ""),
+                    "region": f"{data.get('countryCode', '')} {data.get('city', '')}".strip(),
+                }
+    except Exception:
+        pass
+    return {"ip": "", "region": ""}
 
 
 async def check_all_proxies(proxies: list[dict]) -> list[dict]:

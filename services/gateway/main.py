@@ -281,6 +281,23 @@ async def add_proxy(body: dict, session: AsyncSession = Depends(get_session)):
     return ApiResponse(data={"id": str(proxy.id)})
 
 
+@app.put("/proxy/{proxy_id}", response_model=ApiResponse)
+async def update_proxy(proxy_id: str, body: dict, session: AsyncSession = Depends(get_session)):
+    """修改代理配置。"""
+    import uuid
+    from sqlalchemy import select
+    stmt = select(ProxyEntry).where(ProxyEntry.id == uuid.UUID(proxy_id))
+    result = await session.execute(stmt)
+    proxy = result.scalar_one_or_none()
+    if proxy is None:
+        raise HTTPException(status_code=404, detail="Proxy not found")
+    for field in ("type", "host", "port", "username", "password"):
+        if field in body:
+            setattr(proxy, field, int(body[field]) if field == "port" else body[field])
+    await session.flush()
+    return ApiResponse(data={"id": str(proxy.id)})
+
+
 @app.delete("/proxy/{proxy_id}", response_model=ApiResponse)
 async def delete_proxy(proxy_id: str, session: AsyncSession = Depends(get_session)):
     import uuid
@@ -309,11 +326,15 @@ async def test_proxy(proxy_id: str, session: AsyncSession = Depends(get_session)
     if proxy is None:
         raise HTTPException(status_code=404, detail="Proxy not found")
 
-    from gateway.proxy_manager import check_proxy_health
+    from gateway.proxy_manager import check_proxy_health, detect_proxy_ip
     ptype = proxy.type or "socks5"
     result = await check_proxy_health(proxy.host, int(proxy.port), ptype,
                                        username=proxy.username, password=proxy.password)
-    return ApiResponse(data={"id": str(proxy.id), "result": result})
+    ip_info = {"ip": "", "region": ""}
+    if result in ("available", "slow"):
+        ip_info = await detect_proxy_ip(proxy.host, int(proxy.port), ptype,
+                                         username=proxy.username, password=proxy.password)
+    return ApiResponse(data={"id": str(proxy.id), "result": result, **ip_info})
 
 
 @app.put("/proxy/{proxy_id}/status", response_model=ApiResponse)
