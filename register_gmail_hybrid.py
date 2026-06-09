@@ -562,6 +562,12 @@ async def run(args, worker_id=0, save_lock=None):
             browser = await p.chromium.connect_over_cdp(ws)
             cxt = browser.contexts[0] if browser.contexts else await browser.new_context()
             page = cxt.pages[0] if cxt.pages else await cxt.new_page()
+            # 禁用 passkey 弹窗：覆盖 navigator.credentials，网站 fallback 到密码登录
+            await cxt.add_init_script("""
+                Object.defineProperty(navigator, 'credentials', {
+                    get: () => ({ create: () => Promise.reject('disabled'), get: () => Promise.reject('disabled'), store: () => Promise.reject('disabled') })
+                });
+            """)
 
             signup_url = build_signup_url()
             wlog(f"[browser] 打开注册流...")

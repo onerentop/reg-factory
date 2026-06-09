@@ -1868,6 +1868,12 @@ async def _register_one_browser(bb, idx, proxy_str):
             browser = await p.chromium.connect_over_cdp(ws)
             context = browser.contexts[0] if browser.contexts else await browser.new_context()
             page = await context.new_page()
+            # 禁用 passkey 弹窗：覆盖 navigator.credentials，网站 fallback 到密码登录
+            await context.add_init_script("""
+                Object.defineProperty(navigator, 'credentials', {
+                    get: () => ({ create: () => Promise.reject('disabled'), get: () => Promise.reject('disabled'), store: () => Promise.reject('disabled') })
+                });
+            """)
             # NOTE: resource blocking intentionally disabled in browser mode.
             # PerimeterX behavioral analysis can detect modified network patterns.
             # Bandwidth saving via resource blocking only applies in headless mode.
