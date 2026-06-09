@@ -1381,9 +1381,12 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False):
             print(f"  {tag} verification failed, discarding account")
             return None, None
 
-        # 提取 Graph API refresh_token（用于免密码收发邮件）
+        # 先访问 Outlook 建立登录态（新账号直接走 OAuth 可能被要求重置密码）
         graph = None
         try:
+            print(f"  {tag} [graph] warming up login session...")
+            await page.goto("https://outlook.live.com/mail/0/inbox", timeout=30000, wait_until="domcontentloaded")
+            await asyncio.sleep(5)
             graph = await extract_graph_token(page, context, email, password, idx)
         except Exception as e:
             print(f"  {tag} [graph] extraction error: {e}")
