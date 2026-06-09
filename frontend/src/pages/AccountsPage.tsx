@@ -71,16 +71,21 @@ export default function AccountsPage() {
         if (status === 'SUCCESS') {
           clearInterval(interval)
           setRegistering(false)
-          setRegisterVisible(false)
           const result = data.data?.result || {}
           const results = result.results || []
           const successCount = results.filter((r: any) => r.success).length
-          message.success(`注册完成！成功 ${successCount}/${results.length}`)
           if (successCount > 0) {
+            setRegisterVisible(false)
             const emails = results.filter((r: any) => r.success).map((r: any) => r.email).join(', ')
+            message.success(`注册成功！${emails}`)
             setTaskStatus(`成功: ${emails}`)
+            fetchAccounts()
+          } else {
+            const failedStep = results[0]?.steps?.find((s: any) => !s.success)
+            const errorMsg = failedStep?.error || '注册失败，请检查代理和 ixBrowser'
+            message.error(`注册失败: ${errorMsg}`)
+            setTaskStatus(`失败: ${errorMsg}`)
           }
-          fetchAccounts()
         } else if (status === 'FAILURE') {
           clearInterval(interval)
           setRegistering(false)
