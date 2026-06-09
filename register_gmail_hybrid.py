@@ -356,28 +356,30 @@ async def browser_phone_and_finalize(page, profile, ctx=None, profile_id=None):
     await click_next(page)
     await asyncio.sleep(5)
 
-    # Step2: 条款页 → 滚到底(纯键盘) → 点"我同意"
+    # Step2: 条款页 → 等按钮出现 → 滚到底(纯键盘) → 点"我同意"
     log("[finalize] 条款页...")
-    for _ in range(5):
+    agree_clicked = False
+    for _tos_try in range(6):
         try:
             await page.keyboard.press("End")
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(1)
         except Exception:
+            pass
+        for sel in ['button:has-text("我同意")', 'button:has-text("I agree")']:
+            try:
+                b = page.locator(sel).last
+                if await b.count() and await b.is_visible():
+                    await b.click(timeout=5000)
+                    agree_clicked = True
+                    log("[finalize] 已点击 [我同意]")
+                    break
+            except Exception:
+                continue
+        if agree_clicked:
             break
-    await asyncio.sleep(1)
-    agree_clicked = False
-    for sel in ['button:has-text("我同意")', 'button:has-text("I agree")']:
-        try:
-            b = page.locator(sel).last
-            if await b.count() and await b.is_visible():
-                await b.click(timeout=5000)
-                agree_clicked = True
-                log("[finalize] 已点击 [我同意]")
-                break
-        except Exception:
-            continue
+        await asyncio.sleep(3)
     if not agree_clicked:
-        log("[finalize] 未找到'我同意'按钮", "WARN")
+        log("[finalize] 未找到'我同意'按钮（等了~24秒）", "WARN")
 
     # Step3: 纯等 Google 建号（不做任何操作，等 URL 离开 termsofservice）
     log("[finalize] 等待 Google 建号（不干扰，最多90秒）...")
