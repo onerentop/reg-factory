@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams } from 'react-router-dom'
-import { Table, Button, Space, Input, Select, Modal, message, Steps, Alert, InputNumber, Spin, Tooltip, Row, Col, Card, Statistic } from 'antd'
+import { Table, Button, Space, Input, Select, Modal, message, InputNumber, Spin, Tooltip, Row, Col, Card, Statistic } from 'antd'
 import {
   ReloadOutlined,
   DeleteOutlined,
@@ -55,7 +55,6 @@ export default function AccountsPage() {
   const [statusFilter, setStatusFilter] = useState<string | undefined>()
   const [keyword, setKeyword] = useState('')
   const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([])
-  const [expandedRowKeys, setExpandedRowKeys] = useState<string[]>([])
   const [registerVisible, setRegisterVisible] = useState(false)
   const [registerCount, setRegisterCount] = useState(1)
   const [selectedProxy, setSelectedProxy] = useState<string>('')
@@ -298,30 +297,6 @@ export default function AccountsPage() {
     },
   ]
 
-  const expandedRowRender = (record: Account) => {
-    const steps = record.steps || []
-    if (steps.length === 0) return <div style={{ padding: 16, color: 'var(--text-muted)' }}>暂无步骤信息</div>
-    const failedStep = steps.find(s => s.status === 'failed')
-    return (
-      <div style={{ padding: '12px 0' }}>
-        <Steps size="small"
-          current={steps.findIndex(s => s.status === 'failed') >= 0 ? steps.findIndex(s => s.status === 'failed') : steps.length}
-          status={failedStep ? 'error' : 'finish'}
-          items={steps.map(s => ({
-            title: s.name,
-            description: s.duration_ms ? `${s.duration_ms}ms` : undefined,
-            status: s.status === 'success' ? 'finish' : s.status === 'failed' ? 'error' : s.status === 'running' ? 'process' : 'wait',
-          }))}
-        />
-        {failedStep && (
-          <Alert type="error" message={failedStep.error_message || '步骤执行失败'} style={{ marginTop: 12 }}
-            action={<Button size="small" type="primary" danger>从此步重试</Button>}
-          />
-        )}
-      </div>
-    )
-  }
-
   const platformTitle = platform === 'outlook' ? 'Outlook' : 'Google'
 
   return (
@@ -403,11 +378,6 @@ export default function AccountsPage() {
         columns={columns}
         dataSource={accounts}
         loading={loading}
-        expandable={{
-          expandedRowKeys,
-          onExpand: (expanded, record) => setExpandedRowKeys(expanded ? [record.id] : []),
-          expandedRowRender,
-        }}
         rowSelection={{ selectedRowKeys, onChange: (keys) => setSelectedRowKeys(keys as string[]) }}
         pagination={{
           current: page, pageSize, total,
