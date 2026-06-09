@@ -9,7 +9,7 @@ def test_txt_export():
     result = TxtExporter().export(accounts)
     lines = result.strip().split("\n")
     assert len(lines) == 2
-    assert "a@test.com----pass1----rt1----c1" in lines[0]
+    assert "a@test.com----pass1----c1----rt1" in lines[0]
 
 
 def test_csv_export():
