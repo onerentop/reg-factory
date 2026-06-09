@@ -56,6 +56,7 @@ except Exception:
 CAPSOLVER_API_KEY = os.environ.get("CAPSOLVER_API_KEY", "")
 EZCAPTCHA_API_KEY = os.environ.get("EZCAPTCHA_API_KEY", "")
 EZCAPTCHA_API_BASE = os.environ.get("EZCAPTCHA_API_BASE", "https://api.ez-captcha.com")
+CAPTCHAKINGS_API_KEY = os.environ.get("CAPTCHAKINGS_API_KEY", "")
 
 # Arkose Labs public key for Microsoft signup
 MS_SIGNUP_ARKOSE_KEY = "B7D8911C-5CC8-A9A3-35B0-554ACEE604DA"
@@ -228,6 +229,29 @@ def solve_funcaptcha_ezcaptcha(public_key=MS_SIGNUP_ARKOSE_KEY, page_url="https:
         return None
     except Exception as e:
         print(f"  [ezcaptcha] error: {e}")
+        return None
+
+
+def solve_funcaptcha_captchakings(public_key=MS_SIGNUP_ARKOSE_KEY, page_url="https://signup.live.com/signup?lic=1", max_wait=120):
+    """Use CaptchaKings to solve Arkose Labs (FunCaptcha) — 98% success for MS Outlook."""
+    if not CAPTCHAKINGS_API_KEY:
+        return None
+    try:
+        from captchakings import CaptchaKings
+        solver = CaptchaKings(api_key=CAPTCHAKINGS_API_KEY)
+        print(f"  [captchakings] solving FunCaptcha...")
+        token = solver.funcaptcha(
+            public_key=public_key,
+            url=page_url,
+            service_url="https://client-api.arkoselabs.com",
+        )
+        if token:
+            print(f"  [captchakings] solved! {str(token)[:60]}...")
+            return str(token)
+        print("  [captchakings] no token returned")
+        return None
+    except Exception as e:
+        print(f"  [captchakings] error: {e}")
         return None
 
 
@@ -1312,6 +1336,10 @@ def _proxy_for_requests(proxy_str):
     """Convert proxy string to requests proxies dict."""
     if not proxy_str:
         return None
+    # socks5h:// 直接用（远端 DNS），不经 _parse_proxy 拆解
+    if proxy_str.startswith("socks5h://") or proxy_str.startswith("socks5://"):
+        url = proxy_str.replace("socks5://", "socks5h://", 1)  # 强制远端 DNS
+        return {"http": url, "https": url}
     p = IXBrowserProvider._parse_proxy(proxy_str)
     if not p:
         return None
@@ -1366,11 +1394,9 @@ def register_outlook_protocol(proxy_str=None, idx=0):
 
         html = resp.text
 
-        # Microsoft signup is a React SPA — form fields rendered via JS.
-        # Protocol mode only works if the server-side rendered form is present.
-        # Detect availability by checking for MemberName field.
-        if "MemberName" not in html and "iSignupAction" not in html:
-            print(f"  {tag} SPA form not in HTML (JS-rendered) — protocol N/A")
+        # 检查 ServerData（JSON API 模式只需要 ServerData 里的 apiCanary 和 urlCreateAccount）
+        if "ServerData" not in html and "apiCanary" not in html:
+            print(f"  {tag} ServerData not in HTML — protocol N/A")
             return None, None
 
         # Detect immediate bot-block
@@ -1378,32 +1404,19 @@ def register_outlook_protocol(proxy_str=None, idx=0):
             print(f"  {tag} PerimeterX blocked on load")
             return None, None
 
-        # Extract PPFT (CSRF token)
-        ppft = None
-        for pat in [
-            r'name="PPFT"[^>]*value="([^"]+)"',
-            r'"sFT"\s*:\s*"([^"]+)"',
-            r"sFT\s*:\s*'([^']+)'",
-        ]:
-            m = re.search(pat, html)
-            if m:
-                ppft = m.group(1)
-                break
-        if not ppft:
-            print(f"  {tag} no PPFT token found")
+        # Extract ServerData config (JSON API 模式)
+        import codecs
+        sd_m = re.search(r'var\s+ServerData\s*=\s*(\{.+?\});', html, re.DOTALL)
+        if not sd_m:
+            print(f"  {tag} ServerData not found in HTML")
             return None, None
+        sd = sd_m.group(1)
+        def _sd_extract(key):
+            km = re.search(rf'"{key}"\s*:\s*"([^"]+)"', sd)
+            return codecs.decode(km.group(1), 'unicode_escape') if km else ""
 
-        # Extract uaid and action URL
-        uaid_m = re.search(r'[?&]uaid=([A-Za-z0-9\-]+)', html)
+        uaid_m = re.search(r'uaid=([A-Za-z0-9-]+)', html)
         uaid = uaid_m.group(1) if uaid_m else ""
-        action_m = re.search(r'action="(https://signup\.live\.com[^"]+)"', html)
-        action_url = action_m.group(1) if action_m else f"https://signup.live.com/signup?lic=1&uaid={uaid}"
-
-        # Extract canary token (CSRF #2, optional)
-        canary_name_m = re.search(r'"sCanaryTokenName"\s*:\s*"([^"]+)"', html)
-        canary_val_m = re.search(r'"sCanaryToken"\s*:\s*"([^"]+)"', html)
-        canary_name = canary_name_m.group(1) if canary_name_m else ""
-        canary_val = canary_val_m.group(1) if canary_val_m else ""
 
         # Generate account details
         email, password, prefix = generate_email_password()
@@ -1411,64 +1424,124 @@ def register_outlook_protocol(proxy_str=None, idx=0):
         year, month, day = generate_birthday()
         print(f"  {tag} trying: {email}")
 
-        form_data = {
-            "MemberName": f"{prefix}@outlook.com",
-            "Password": password,
+        api_canary = _sd_extract("apiCanary")
+        hpgid = _sd_extract("hpgid") or "200225"
+        if not api_canary:
+            print(f"  {tag} no apiCanary found")
+            return None, None
+
+        # Check email availability via JSON API
+        print(f"  {tag} checking availability...")
+        resp_check = session.post(
+            "https://signup.live.com/API/CheckAvailableSigninNames",
+            json={"signInName": email, "uaid": uaid, "includeSuggestions": True, "mkt": "en-US", "scid": "100118"},
+            headers={"canary": api_canary, "hpgid": hpgid,
+                     "Origin": "https://signup.live.com", "Referer": "https://signup.live.com/signup?lic=1"},
+            proxies=proxies, timeout=15,
+        )
+        if resp_check.status_code == 200:
+            try:
+                avail = resp_check.json()
+                if avail.get("isAvailable") is False:
+                    print(f"  {tag} email taken")
+                    return None, None
+            except Exception:
+                pass
+
+        # Solve FunCaptcha (try all available platforms)
+        fc_token = None
+        for solver_name, solver_fn in [
+            ("captchakings", lambda: solve_funcaptcha_captchakings(MS_SIGNUP_ARKOSE_KEY, "https://signup.live.com/signup?lic=1")),
+            ("capsolver", lambda: solve_arkose_capsolver(MS_SIGNUP_ARKOSE_KEY, "https://signup.live.com/")),
+            ("ezcaptcha", lambda: solve_funcaptcha_ezcaptcha(MS_SIGNUP_ARKOSE_KEY, "https://signup.live.com/")),
+        ]:
+            print(f"  {tag} trying {solver_name}...")
+            fc_token = solver_fn()
+            if fc_token:
+                print(f"  {tag} {solver_name} solved!")
+                break
+        if not fc_token:
+            print(f"  {tag} all captcha solvers failed")
+            return None, None
+
+        # CreateAccount via JSON API
+        print(f"  {tag} POST CreateAccount...")
+        create_payload = {
+            "MemberName": email,
+            "CheckAvailStateMap": [f"{email}:undefined"],
+            "EvictionWarningShown": [],
+            "UpgradeFlowToken": {},
             "FirstName": first_name,
             "LastName": last_name,
-            "BirthDate": str(day),
-            "BirthMonth": str(month),
-            "BirthYear": str(year),
+            "MemberNameChangeCount": 1,
+            "MemberNameAvailableCount": 1,
+            "MemberNameUnavailableCount": 0,
+            "CipherValue": "",
+            "SKI": "",
+            "BirthDate": day,
+            "BirthMonth": month,
+            "BirthYear": year,
             "Country": "US",
-            "LiveDomainBoxList": "outlook.com",
-            "LcId": "1033",
-            "PPFT": ppft,
-            "lic": "1",
-            "sErrorCode": "",
-            "iSignupFlow": "2",
+            "IsOptOutEmailDefault": True,
+            "IsOptOutEmailShown": 1,
+            "IsOptOutEmail": 1,
+            "LW": 1,
+            "SQ": 0,
+            "IsSAMRequired": 0,
+            "SetOptOutEmail": 1,
+            "ReturnUrl": "",
+            "SignupReturnUrl": "",
+            "uiflvr": 1,
+            "uaid": uaid,
+            "SuggestedAccountType": "OUTLOOK",
+            "SuggestionType": "Locked",
+            "HFId": hpgid,
+            "encAttemptToken": "",
+            "dfpRequestId": "",
+            "scid": "100118",
+            "hpgid": hpgid,
+            "Password": password,
+            "iSignupAction": "signup",
+            "HType": "enforcement",
+            "HSol": fc_token,
+            "HId": MS_SIGNUP_ARKOSE_KEY,
         }
-        if canary_name and canary_val:
-            form_data[canary_name] = canary_val
-
         resp2 = session.post(
-            action_url,
-            data=form_data,
+            "https://signup.live.com/API/CreateAccount?lic=1",
+            json=create_payload,
             headers={
-                "Content-Type": "application/x-www-form-urlencoded",
-                "Referer": "https://signup.live.com/signup?lic=1",
+                "canary": api_canary,
+                "hpgid": hpgid,
+                "scid": "100118",
                 "Origin": "https://signup.live.com",
+                "Referer": "https://signup.live.com/signup?lic=1",
+                "Content-Type": "application/json",
             },
-            proxies=proxies, timeout=30, allow_redirects=True,
+            proxies=proxies, timeout=30,
         )
+        print(f"  {tag} CreateAccount status={resp2.status_code}")
+        body = resp2.text
 
-        final_url = resp2.url.lower()
-        body = resp2.text.lower()
-
-        # Success: left signup domain
-        if "signup" not in final_url and any(kw in final_url for kw in ["outlook", "live.com", "microsoft"]):
-            if not verify_registered_outlook(email, password, tag):
-                print(f"  {tag} verification failed, discarding proto account")
+        try:
+            result = resp2.json()
+            err = result.get("error")
+            if err:
+                code = err.get("code", "")
+                data = err.get("data", "") or err.get("message", "")
+                print(f"  {tag} ERROR: code={code} data={str(data)[:100]}")
                 return None, None
-            print(f"  {tag} OK (proto): {email}")
-            return email, password
+        except Exception:
+            pass
 
-        # Captcha / bot detection → fall back
-        if any(kw in body for kw in ["captcha", "perimeterx", "challenge", "press and hold",
-                                      "verify you're human", "unusual activity", "_pxhd"]):
-            print(f"  {tag} captcha/bot detected — proto failed")
+        # Success check
+        if resp2.status_code == 200 and "error" not in body.lower():
+            if verify_registered_outlook(email, password, tag):
+                print(f"  {tag} OK (proto): {email}")
+                return email, password
+            print(f"  {tag} verification failed")
             return None, None
 
-        # Email taken
-        if ("already" in body and "email" in body) or "taken" in body:
-            print(f"  {tag} email taken")
-            return None, None
-
-        # Blocked
-        if "blocked" in body or "suspended" in body:
-            print(f"  {tag} account blocked")
-            return None, None
-
-        print(f"  {tag} unknown result: {resp2.url[:80]}")
+        print(f"  {tag} unknown result: {body[:120]}")
         return None, None
 
     except Exception as e:
