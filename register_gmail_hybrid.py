@@ -283,9 +283,10 @@ async def browser_phone_and_finalize(page, profile, ctx=None, profile_id=None):
     max_price = os.environ.get("SMS_MAXPRICE_GMAIL", "0.1024")
     hero_country = (os.environ.get("SMS_HERO_COUNTRIES", "52").split(",")[0]).strip()
     fixed = os.environ.get("SMS_HERO_FIXED_PRICE", "true").lower() in ("1", "true", "yes")
-    max_tries = int(os.environ.get("SMS_MAX_TRIES", "15"))
+    max_tries = int(os.environ.get("SMS_MAX_TRIES", "10"))
     code_wait = int(os.environ.get("SMS_CODE_WAIT", "90"))
     phone_used = None
+    consecutive_reject = 0
 
     for attempt in range(1, max_tries + 1):
         pkey = None
@@ -317,6 +318,7 @@ async def browser_phone_and_finalize(page, profile, ctx=None, profile_id=None):
 
         # 判定：是否进入收码页(input#code 出现 = 号被接受)
         if await is_visible(page, "input#code, input[name=code]", 3):
+            consecutive_reject = 0
             log(f"[sms] {e164} 被接受，等码 (≤{code_wait}s)...")
             code = sms.get_code(pkey, max_wait=code_wait, interval=4)
             if not code:
@@ -340,6 +342,7 @@ async def browser_phone_and_finalize(page, profile, ctx=None, profile_id=None):
             break
         else:
             # 没进收码页——看页面到底显示了什么
+            consecutive_reject += 1
             try:
                 diag = (await page.inner_text("body"))[:80].replace("\n", " ")
             except Exception:
@@ -347,6 +350,9 @@ async def browser_phone_and_finalize(page, profile, ctx=None, profile_id=None):
             log(f"[sms] {e164} 不可用，换号 | 页面: {diag}", "WARN")
             try: sms.release(pkey)
             except Exception: pass
+            if consecutive_reject >= 5:
+                log("[sms] 连续5个号被拒，会话可能不被信任，放弃", "WARN")
+                break
             # 可能还在手机页(号被拒不跳页)或出错页，确保回到手机页
             if "verifyphone" in page.url or "error" in page.url:
                 try: await page.go_back(timeout=8000)
