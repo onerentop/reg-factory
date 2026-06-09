@@ -23,7 +23,7 @@ export default function ProxyPage() {
       .then(res => setProxies((res.data || []).map((p: any) => ({
         ...p,
         id: p.id || Date.now().toString(),
-        active: p.status === 'active' || p.status === 'available',
+        active: p.status !== 'inactive',
       }))))
       .catch(() => {})
   }
@@ -71,10 +71,9 @@ export default function ProxyPage() {
     try {
       const resp = await fetch(`/api/proxy/${id}/test`, { method: 'POST' })
       const data = await resp.json()
-      const newStatus = data.data?.status || 'unavailable'
       const testResult = data.data?.result || 'unavailable'
       setProxies(prev => prev.map(p =>
-        p.id === id ? { ...p, status: newStatus, active: newStatus === 'active' } : p
+        p.id === id ? { ...p, status: testResult === 'available' ? 'available' : testResult === 'slow' ? 'slow' : 'unavailable' } : p
       ))
       if (testResult === 'available' || testResult === 'slow') {
         message.success(`代理可用${testResult === 'slow' ? '（较慢）' : ''}`)
@@ -114,7 +113,7 @@ export default function ProxyPage() {
       render: (_: any, record: Proxy) => (
         <Switch
           size="small"
-          checked={record.status === 'active' || record.status === 'available'}
+          checked={record.active !== false}
           onChange={(checked) => toggleActive(record.id, checked)}
         />
       ),
@@ -138,7 +137,7 @@ export default function ProxyPage() {
         <h2>代理配置</h2>
         <Space>
           <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>
-            已激活 {proxies.filter(p => p.status === 'active' || p.status === 'available').length} / {proxies.length}
+            已激活 {proxies.filter(p => p.active !== false).length} / {proxies.length}
           </span>
           <Button onClick={testAll} disabled={proxies.length === 0}>一键测试全部</Button>
           <Button type="primary" icon={<PlusOutlined />} onClick={() => setAddVisible(true)}>添加代理</Button>

@@ -311,13 +311,9 @@ async def test_proxy(proxy_id: str, session: AsyncSession = Depends(get_session)
 
     from gateway.proxy_manager import check_proxy_health
     ptype = proxy.type or "socks5"
-    status = await check_proxy_health(proxy.host, int(proxy.port), ptype,
+    result = await check_proxy_health(proxy.host, int(proxy.port), ptype,
                                        username=proxy.username, password=proxy.password)
-    proxy.status = status if status != "unavailable" else "unavailable"
-    if status in ("available", "slow"):
-        proxy.status = "active"
-    await session.flush()
-    return ApiResponse(data={"id": str(proxy.id), "status": proxy.status, "result": status})
+    return ApiResponse(data={"id": str(proxy.id), "result": result})
 
 
 @app.put("/proxy/{proxy_id}/status", response_model=ApiResponse)
