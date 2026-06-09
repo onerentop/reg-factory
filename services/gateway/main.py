@@ -416,15 +416,23 @@ async def extract_graph_token_api(body: dict):
     result = await loop.run_in_executor(None, get_graph_token, email, password, 0)
 
     if result and result.get("refresh_token"):
+        client_id = result.get("client_id", "9e5f94bc-e8a4-4e73-b8be-63364c29d753")
         if account_id:
             try:
                 async with _httpx.AsyncClient(timeout=10) as client:
                     await client.put(f"{_ACCOUNT_URL}/accounts/{account_id}", json={
-                        "tokens": {"refresh_token": result["refresh_token"]},
+                        "tokens": {
+                            "refresh_token": result["refresh_token"],
+                            "client_id": client_id,
+                        },
                     })
             except Exception:
                 pass
-        return ApiResponse(data={"success": True, "email": email, "refresh_token": result["refresh_token"][:20] + "..."})
+        return ApiResponse(data={
+            "success": True, "email": email,
+            "client_id": client_id,
+            "refresh_token": result["refresh_token"][:20] + "...",
+        })
 
     return ApiResponse(data={"success": False, "email": email, "error": str(result) if result else "Failed to get token"})
 

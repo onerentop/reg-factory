@@ -17,11 +17,12 @@ class TxtExporter(ExportStrategy):
     def export(self, accounts: list[dict[str, Any]]) -> str:
         lines = []
         for a in accounts:
+            tokens = a.get("tokens") or {}
             parts = [
                 a.get("email", ""),
                 a.get("password", ""),
-                a.get("tokens", {}).get("refresh_token", "") if a.get("tokens") else "",
-                a.get("tokens", {}).get("client_id", "") if a.get("tokens") else "",
+                tokens.get("client_id", ""),
+                tokens.get("refresh_token", ""),
             ]
             lines.append("----".join(parts))
         return "\n".join(lines)

@@ -105,6 +105,7 @@ def register_outlook_new(self, count: int = 1, proxy: str = "", config: dict = N
                             "total_steps": len(step_results),
                             "metadata": {
                                 "refresh_token": context.get("refresh_token", ""),
+                                "client_id": "9e5f94bc-e8a4-4e73-b8be-63364c29d753",
                                 "proxy": proxy[:30] if proxy else "",
                             },
                         })
