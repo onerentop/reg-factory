@@ -18,11 +18,13 @@ class TxtExporter(ExportStrategy):
         lines = []
         for a in accounts:
             tokens = a.get("tokens") or {}
+            refresh_token = tokens.get("refresh_token", "")
+            client_id = tokens.get("client_id", "9e5f94bc-e8a4-4e73-b8be-63364c29d753") if refresh_token else ""
             parts = [
                 a.get("email", ""),
                 a.get("password", ""),
-                tokens.get("client_id", ""),
-                tokens.get("refresh_token", ""),
+                client_id,
+                refresh_token,
             ]
             lines.append("----".join(parts))
         return "\n".join(lines)
