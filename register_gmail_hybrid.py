@@ -446,71 +446,78 @@ async def _relogin_same_window(page, email, password):
     """unknownerror 后在同一窗口登录（同IP同指纹→不触发验证）→ 窗口保留已登录态。"""
     log("[relogin] 在同窗口重新登录...")
     try:
-        await page.goto("https://accounts.google.com/signin/v2/identifier?hl=en&flowName=GlifWebSignIn&flowEntry=ServiceLogin",
-                        wait_until="domcontentloaded", timeout=30000)
-        await asyncio.sleep(3)
-        # 邮箱
-        for sel in ['input#identifierId', 'input[type=email]']:
-            try:
-                loc = page.locator(sel).first
-                if await loc.count() and await loc.is_visible():
-                    await loc.click(timeout=3000)
-                    await asyncio.sleep(0.3)
-                    await page.keyboard.type(email, delay=30)
-                    break
-            except Exception:
-                continue
-        for sel in ['#identifierNext button', 'button[jsname="LgbsSe"]']:
-            try:
-                b = page.locator(sel).first
-                if await b.count() and await b.is_visible():
-                    await b.click(timeout=4000); break
-            except Exception:
-                continue
-        await asyncio.sleep(5)
-        # 密码
-        for sel in ['input[type=password]', 'input[name=Passwd]']:
-            try:
-                loc = page.locator(sel).first
-                if await loc.count() and await loc.is_visible():
-                    await loc.click(timeout=3000)
-                    await asyncio.sleep(0.3)
-                    await page.keyboard.type(password, delay=30)
-                    break
-            except Exception:
-                continue
-        for sel in ['#passwordNext button', 'button[jsname="LgbsSe"]']:
-            try:
-                b = page.locator(sel).first
-                if await b.count() and await b.is_visible():
-                    await b.click(timeout=4000); break
-            except Exception:
-                continue
-        await asyncio.sleep(6)
-        # 跳过中间页（passkey等）
-        for _ in range(5):
-            skipped = False
-            for sel in ['button:has-text("Not now")', 'button:has-text("暂不")',
-                        'button:has-text("跳过")', 'button:has-text("Skip")']:
-                try:
-                    b = page.locator(sel).first
-                    if await b.count() and await b.is_visible():
-                        await b.click(timeout=3000); skipped = True; break
-                except Exception:
-                    continue
-            if not skipped:
-                break
-            await asyncio.sleep(3)
-        # 验证登录态
-        await page.goto("https://myaccount.google.com/?hl=en", wait_until="domcontentloaded", timeout=30000)
-        await asyncio.sleep(4)
-        url = page.url
-        if "myaccount.google.com" in url and "about" not in url:
-            log(f"[relogin] 登录成功: {url[:55]}")
-        else:
-            log(f"[relogin] 登录未确认: {url[:55]}", "WARN")
+        await asyncio.wait_for(_do_relogin(page, email, password), timeout=45)
+    except asyncio.TimeoutError:
+        log("[relogin] 超时(45s)，跳过（账号已建成，不影响）", "WARN")
     except Exception as e:
         log(f"[relogin] 异常: {e}", "WARN")
+
+
+async def _do_relogin(page, email, password):
+    """relogin 实际逻辑（由 _relogin_same_window 包装超时控制）。"""
+    await page.goto("https://accounts.google.com/signin/v2/identifier?hl=en&flowName=GlifWebSignIn&flowEntry=ServiceLogin",
+                    wait_until="domcontentloaded", timeout=30000)
+    await asyncio.sleep(3)
+    # 邮箱
+    for sel in ['input#identifierId', 'input[type=email]']:
+        try:
+            loc = page.locator(sel).first
+            if await loc.count() and await loc.is_visible():
+                await loc.click(timeout=3000)
+                await asyncio.sleep(0.3)
+                await page.keyboard.type(email, delay=30)
+                break
+        except Exception:
+            continue
+    for sel in ['#identifierNext button', 'button[jsname="LgbsSe"]']:
+        try:
+            b = page.locator(sel).first
+            if await b.count() and await b.is_visible():
+                await b.click(timeout=4000); break
+        except Exception:
+            continue
+    await asyncio.sleep(5)
+    # 密码
+    for sel in ['input[type=password]', 'input[name=Passwd]']:
+        try:
+            loc = page.locator(sel).first
+            if await loc.count() and await loc.is_visible():
+                await loc.click(timeout=3000)
+                await asyncio.sleep(0.3)
+                await page.keyboard.type(password, delay=30)
+                break
+        except Exception:
+            continue
+    for sel in ['#passwordNext button', 'button[jsname="LgbsSe"]']:
+        try:
+            b = page.locator(sel).first
+            if await b.count() and await b.is_visible():
+                await b.click(timeout=4000); break
+        except Exception:
+            continue
+    await asyncio.sleep(6)
+    # 跳过中间页（passkey等）
+    for _ in range(3):
+        skipped = False
+        for sel in ['button:has-text("Not now")', 'button:has-text("暂不")',
+                    'button:has-text("跳过")', 'button:has-text("Skip")']:
+            try:
+                b = page.locator(sel).first
+                if await b.count() and await b.is_visible():
+                    await b.click(timeout=3000); skipped = True; break
+            except Exception:
+                continue
+        if not skipped:
+            break
+        await asyncio.sleep(3)
+    # 验证登录态
+    await page.goto("https://myaccount.google.com/?hl=en", wait_until="domcontentloaded", timeout=30000)
+    await asyncio.sleep(4)
+    url = page.url
+    if "myaccount.google.com" in url and "about" not in url:
+        log(f"[relogin] 登录成功: {url[:55]}")
+    else:
+        log(f"[relogin] 登录未确认: {url[:55]}", "WARN")
 
 
 # ======================== 主流程 ========================
