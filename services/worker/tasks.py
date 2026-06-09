@@ -80,9 +80,9 @@ def cleanup_old_logs():
     return {"status": "cleaned"}
 
 
-@celery_app.task(name="register_outlook_new", bind=True)
-def register_outlook_new(self, count: int = 1, proxy: str = "", config: dict = None):
-    """从前端触发的 Outlook 新账号注册。自动生成邮箱，从代理管理获取代理。"""
+@celery_app.task(name="register_outlook_single", bind=True)
+def register_outlook_single(self, idx: int = 0, proxy: str = "", config: dict = None):
+    """单号 Outlook 注册任务。每个任务独立注册一个账号。"""
     import asyncio
     from worker.step_engine import FlowRegistry
     from worker.legacy_bridge import LegacyBridge
@@ -97,7 +97,7 @@ def register_outlook_new(self, count: int = 1, proxy: str = "", config: dict = N
     if not proxy:
         proxy = _fetch_proxy_from_manager()
 
-    print(f"[register_outlook_new] proxy={'yes: ' + proxy[:30] + '...' if proxy else 'NONE'}, count={count}")
+    print(f"[outlook#{idx}] proxy={'yes: ' + proxy[:30] + '...' if proxy else 'NONE'}")
 
     from worker.log_capture import LogCapture
     task_id = self.request.id or "unknown"
@@ -105,57 +105,53 @@ def register_outlook_new(self, count: int = 1, proxy: str = "", config: dict = N
 
     async def _run():
         import httpx
-        results = []
-        for i in range(count):
-            flow = FlowRegistry.get("outlook")
-            context = {"idx": i, "proxy": proxy, **(config or {})}
-            step_results = await flow.run(context)
-            success = all(r.success for r in step_results)
-            email = context.get("email", "")
-            password = context.get("password", "")
+        flow = FlowRegistry.get("outlook")
+        context = {"idx": idx, "proxy": proxy, **(config or {})}
+        step_results = await flow.run(context)
+        success = all(r.success for r in step_results)
+        email = context.get("email", "")
+        password = context.get("password", "")
 
-            if success and email:
-                try:
-                    async with httpx.AsyncClient(timeout=10) as client:
-                        create_resp = await client.post("http://localhost:8002/accounts", json={
-                            "email": email,
-                            "password": password,
-                            "platform": "outlook",
-                            "total_steps": len(step_results),
-                            "metadata": {
-                                "refresh_token": context.get("refresh_token", ""),
+        if success and email:
+            try:
+                async with httpx.AsyncClient(timeout=10) as client:
+                    create_resp = await client.post("http://localhost:8002/accounts", json={
+                        "email": email,
+                        "password": password,
+                        "platform": "outlook",
+                        "total_steps": len(step_results),
+                        "metadata": {
+                            "refresh_token": context.get("refresh_token", ""),
+                            "client_id": "9e5f94bc-e8a4-4e73-b8be-63364c29d753",
+                            "proxy": proxy[:30] if proxy else "",
+                        },
+                    })
+                    account_data = create_resp.json().get("data", {})
+                    account_id = account_data.get("id")
+                    if account_id:
+                        raw_token = context.get("refresh_token", "")
+                        if isinstance(raw_token, dict):
+                            refresh_token = raw_token.get("refresh_token", "")
+                        else:
+                            refresh_token = str(raw_token) if raw_token else ""
+                        await client.put(f"http://localhost:8002/accounts/{account_id}", json={
+                            "status": "success",
+                            "current_step": len(step_results),
+                            "tokens": {
+                                "refresh_token": refresh_token,
                                 "client_id": "9e5f94bc-e8a4-4e73-b8be-63364c29d753",
-                                "proxy": proxy[:30] if proxy else "",
-                            },
+                            } if refresh_token else None,
                         })
-                        account_data = create_resp.json().get("data", {})
-                        account_id = account_data.get("id")
-                        if account_id:
-                            raw_token = context.get("refresh_token", "")
-                            if isinstance(raw_token, dict):
-                                refresh_token = raw_token.get("refresh_token", "")
-                            else:
-                                refresh_token = str(raw_token) if raw_token else ""
-                            await client.put(f"http://localhost:8002/accounts/{account_id}", json={
-                                "status": "success",
-                                "current_step": len(step_results),
-                                "tokens": {
-                                    "refresh_token": refresh_token,
-                                    "client_id": "9e5f94bc-e8a4-4e73-b8be-63364c29d753",
-                                } if refresh_token else None,
-                            })
-                    print(f"[register_outlook_new] saved to Account Service: {email}")
-                except Exception as e:
-                    print(f"[register_outlook_new] failed to save to Account Service: {e}")
+                print(f"[outlook#{idx}] saved: {email}")
+            except Exception as e:
+                print(f"[outlook#{idx}] save failed: {e}")
 
-            results.append({
-                "index": i,
-                "success": success,
-                "email": email,
-                "has_token": bool(context.get("refresh_token")),
-                "steps": [{"name": r.name, "success": r.success, "error": r.error, "duration_ms": r.duration_ms} for r in step_results],
-            })
-        return {"count": count, "results": results}
+        return {
+            "success": success,
+            "email": email,
+            "has_token": bool(context.get("refresh_token")),
+            "steps": [{"name": r.name, "success": r.success, "error": r.error, "duration_ms": r.duration_ms} for r in step_results],
+        }
 
     try:
         return asyncio.run(_run())

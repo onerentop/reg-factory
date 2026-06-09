@@ -399,13 +399,16 @@ async def proxy_config(request: Request, path: str):
 
 @app.post("/register/outlook", response_model=ApiResponse)
 async def trigger_outlook_registration(body: dict = {}):
-    """从前端触发 Outlook 注册。"""
-    from worker.tasks import register_outlook_new
+    """从前端触发 Outlook 注册。并发 dispatch 多个单号任务。"""
+    from worker.tasks import register_outlook_single
     count = body.get("count", 1)
     proxy = body.get("proxy", "")
     config = body.get("config", {})
-    task = register_outlook_new.delay(count, proxy, config)
-    return ApiResponse(data={"task_id": task.id, "status": "queued", "count": count})
+    task_ids = []
+    for i in range(count):
+        task = register_outlook_single.delay(i, proxy, config)
+        task_ids.append(task.id)
+    return ApiResponse(data={"task_ids": task_ids, "status": "queued", "count": count})
 
 
 @app.get("/tasks/{task_id}", response_model=ApiResponse)

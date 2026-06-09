@@ -131,48 +131,66 @@ export default function AccountsPage() {
         body: JSON.stringify({ count: registerCount, proxy: selectedProxy }),
       })
       const data = await resp.json()
-      if (data.data?.task_id) {
-        const tid = data.data.task_id
-        setTaskId(tid)
-        setTaskStatus('注册中...')
-        setLogLines(prev => [...prev, `[任务] 已提交 (${tid.slice(0, 8)}...)`])
-        const wsUrl = `ws://${window.location.hostname}:8000/ws/task/${tid}/logs`
-        const ws = new WebSocket(wsUrl)
-        ws.onmessage = (e) => {
-          try {
-            const d = JSON.parse(e.data)
-            if (d.type === 'log' && d.message) setLogLines(prev => [...prev, d.message].slice(-200))
-            if (d.type === 'done') ws.close()
-          } catch { setLogLines(prev => [...prev, e.data]) }
-        }
-        const interval = setInterval(async () => {
-          try {
-            const r = await fetch(`/api/tasks/${tid}`)
-            const d = await r.json()
-            const s = d.data?.status
-            if (s === 'SUCCESS') {
-              clearInterval(interval)
-              setRegistering(false)
-              const results = d.data?.result?.results || []
-              const ok = results.filter((r: any) => r.success).length
-              if (ok > 0) {
-                const emails = results.filter((r: any) => r.success).map((r: any) => r.email).join(', ')
-                message.success(`注册成功: ${emails}`)
-                setTaskStatus(`✅ ${emails}`)
-                setLogLines(prev => [...prev, `🎉 成功: ${emails}`])
-                fetchAccounts()
-              } else {
-                const err = results[0]?.steps?.find((s: any) => !s.success)?.error || '失败'
-                message.error(`注册失败: ${err}`)
-                setTaskStatus(`❌ ${err}`)
-                setLogLines(prev => [...prev, `💥 ${err}`])
+      const taskIds: string[] = data.data?.task_ids || []
+      if (taskIds.length > 0) {
+        setTaskId(taskIds[0])
+        setTaskStatus(`${taskIds.length} 个任务并发中...`)
+        setLogLines(prev => [...prev, `[调度] 已提交 ${taskIds.length} 个并发任务`])
+
+        // 为每个任务连接 WebSocket 日志
+        taskIds.forEach((tid, i) => {
+          setLogLines(prev => [...prev, `[#${i}] 任务 ${tid.slice(0, 8)}... 开始`])
+          const ws = new WebSocket(`ws://${window.location.hostname}:8000/ws/task/${tid}/logs`)
+          ws.onmessage = (e) => {
+            try {
+              const d = JSON.parse(e.data)
+              if (d.type === 'log' && d.message) {
+                setLogLines(prev => [...prev, `[#${i}] ${d.message}`].slice(-300))
               }
-            } else if (s === 'FAILURE') {
-              clearInterval(interval)
-              setRegistering(false)
-              setTaskStatus('任务异常')
+              if (d.type === 'done') ws.close()
+            } catch { setLogLines(prev => [...prev, `[#${i}] ${e.data}`]) }
+          }
+        })
+
+        // 轮询所有任务状态
+        const completed = new Set<string>()
+        const results: Record<string, any> = {}
+        const interval = setInterval(async () => {
+          for (const tid of taskIds) {
+            if (completed.has(tid)) continue
+            try {
+              const r = await fetch(`/api/tasks/${tid}`)
+              const d = await r.json()
+              const s = d.data?.status
+              if (s === 'SUCCESS' || s === 'FAILURE') {
+                completed.add(tid)
+                results[tid] = d.data?.result || {}
+                const idx = taskIds.indexOf(tid)
+                if (s === 'SUCCESS' && d.data?.result?.success) {
+                  const email = d.data.result.email || ''
+                  setLogLines(prev => [...prev, `[#${idx}] 🎉 成功: ${email}`])
+                } else {
+                  const err = d.data?.result?.steps?.find((st: any) => !st.success)?.error || d.data?.error || '失败'
+                  setLogLines(prev => [...prev, `[#${idx}] 💥 ${err}`])
+                }
+                setTaskStatus(`完成 ${completed.size}/${taskIds.length}`)
+              }
+            } catch {}
+          }
+          if (completed.size >= taskIds.length) {
+            clearInterval(interval)
+            setRegistering(false)
+            const okCount = Object.values(results).filter((r: any) => r.success).length
+            const emails = Object.values(results).filter((r: any) => r.success).map((r: any) => r.email).filter(Boolean)
+            if (okCount > 0) {
+              message.success(`注册完成：成功 ${okCount}/${taskIds.length}`)
+              setTaskStatus(`✅ 成功 ${okCount}/${taskIds.length}: ${emails.join(', ')}`)
+            } else {
+              message.error(`全部失败 (${taskIds.length} 个)`)
+              setTaskStatus(`❌ 全部失败`)
             }
-          } catch {}
+            fetchAccounts()
+          }
         }, 5000)
       } else {
         setRegistering(false)
