@@ -23,6 +23,9 @@ import argparse
 import asyncio
 import json
 import os
+import random
+import re
+import string
 import sys
 import time
 import importlib.util
@@ -144,6 +147,24 @@ def clash_proxy_from_env():
 
 
 
+_SID_RE = re.compile(r"-sid-[^-]+-")
+_SESSION_RE = re.compile(r"_session-[^_]+")
+
+
+def rotate_proxy_sid(proxy_str):
+    """轮换代理的粘性会话标识，每次注册换一个出口 IP。
+    支持 1024proxy 的 -sid-XXXX- 和 IPRoyal 的 _session-XXXX 两种格式；
+    不含会话标识的代理原样返回。"""
+    if not proxy_str:
+        return proxy_str
+    new = "".join(random.choices(string.ascii_letters + string.digits, k=10))
+    if "-sid-" in proxy_str:
+        return _SID_RE.sub(f"-sid-{new}-", proxy_str, count=1)
+    if "_session-" in proxy_str:
+        return _SESSION_RE.sub(f"_session-{new}", proxy_str, count=1)
+    return proxy_str
+
+
 def count_pool():
     if not os.path.isdir(POOL_DIR):
         return 0
@@ -213,7 +234,7 @@ async def one_attempt(mod, proxy_str, idx):
                 # Use our own create that picks coreVersion=146 (matches the
                 # ixBrowser install on this machine). Standalone's hardcoded
                 # 130 makes BB return 502.
-                profile_id = bb.create_browser(name=f"outlook_loop_{ts}_{idx}")
+                profile_id = bb.create_browser(name=f"outlook_loop_{ts}_{idx}", proxy_str=proxy_str)
                 break
             except Exception as e:
                 m = str(e)
@@ -306,11 +327,16 @@ def main():
             pass
 
     mod = load_standalone()
-    proxy = clash_proxy_from_env()
+    # 优先用 OUTLOOK_PROXIES 的首个代理（保留 socks5:// 前缀）作为 ixBrowser
+    # per-window 代理；为空再回退到 HTTP_PROXY/Clash 本地端口。
+    _op = os.environ.get("OUTLOOK_PROXIES", "").replace(",", "\n").splitlines()
+    proxy = next((p.strip() for p in _op if p.strip() and not p.strip().startswith("#")), None)
     if not proxy:
-        log("HTTP_PROXY not set — running without proxy (signup will likely fail)", "WARN")
+        proxy = clash_proxy_from_env()
+    if not proxy:
+        log("no proxy (OUTLOOK_PROXIES / HTTP_PROXY empty) — signup will likely fail", "WARN")
     else:
-        log(f"using clash proxy: {proxy}")
+        log(f"using per-window proxy: {proxy}")
 
     # Initialize Clash controller for per-attempt node rotation. MS PerimeterX
     # learns the egress IP fast — without rotation we get ERR_CONNECTION_CLOSED
@@ -336,13 +362,18 @@ def main():
             continue
         # Rotate Clash node before each attempt so MS PX sees a fresh IP.
         maybe_rotate(clash_client, clash_group)
+        # 每次注册换一个住宅代理 sid -> 新出口 IP，避免微软对固定 IP 风控
+        attempt_proxy = rotate_proxy_sid(proxy)
+        if attempt_proxy and attempt_proxy != proxy:
+            _m = re.search(r"(?:-sid-|_session-)([^-_@]+)", attempt_proxy)
+            log(f"proxy session -> {_m.group(1) if _m else '?'}")
         log(f"=== attempt #{n}  (pool={ps}, succ={succ}, fail={failed}) ===")
         t0 = time.time()
         email = password = None
         cookies = []
         try:
             email, password, cookies = asyncio.run(
-                asyncio.wait_for(one_attempt(mod, proxy, n), timeout=args.timeout)
+                asyncio.wait_for(one_attempt(mod, attempt_proxy, n), timeout=args.timeout)
             )
         except Exception as e:
             log(f"attempt raised {type(e).__name__}: {str(e)[:200]}", "WARN")

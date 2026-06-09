@@ -113,6 +113,7 @@ def make_driver(
                 [
                     "com.google.android.gm.ConversationListActivityGmail",
                     "com.google.android.gm.welcome.SetupAddressesActivity",
+                    "com.google.android.gm.welcome.WelcomeTourActivity",
                     "com.google.android.gms.*",
                 ]
             ),
@@ -121,6 +122,13 @@ def make_driver(
     options.set_capability("adbExecTimeout", 90000)
     options.set_capability("uiautomator2ServerInstallTimeout", 90000)
     options.set_capability("uiautomator2ServerLaunchTimeout", 90000)
+    # BlueStacks ADB 兼容性：跳过会搞崩 ADB 的初始化/清理步骤
+    options.set_capability("skipDeviceInitialization", True)
+    options.set_capability("skipServerInstallation", False)
+    options.set_capability("ignoreHiddenApiPolicyError", True)
+    options.set_capability("suppressKillServer", True)
+    options.set_capability("remoteAdbHost", "127.0.0.1")
+    options.set_capability("adbPort", 5037)
     return webdriver.Remote(server_url, options=options)
 
 
@@ -193,7 +201,7 @@ def xpath_literal(value: str) -> str:
     return "concat(" + ", \"'\", ".join(f"'{part}'" for part in parts) + ")"
 
 
-def click_text(driver: webdriver.Remote, text: str, contains: bool = False, timeout: int = 20) -> bool:
+def click_text(driver: webdriver.Remote, text: str, contains: bool = False, timeout: int = 10) -> bool:
     end = time.time() + timeout
     while time.time() < end:
         el = find_text(driver, text, contains=contains)
@@ -201,17 +209,17 @@ def click_text(driver: webdriver.Remote, text: str, contains: bool = False, time
             try:
                 log(f"click: {text}")
                 el.click()
-                time.sleep(2)
+                time.sleep(0.5)
                 return True
             except (StaleElementReferenceException, WebDriverException) as exc:
                 if not is_stale_error(exc):
                     raise
-                time.sleep(1)
-        time.sleep(1)
+                time.sleep(0.5)
+        time.sleep(0.5)
     return False
 
 
-def tap_text_center(driver: webdriver.Remote, text: str, contains: bool = False, timeout: int = 20) -> bool:
+def tap_text_center(driver: webdriver.Remote, text: str, contains: bool = False, timeout: int = 10) -> bool:
     end = time.time() + timeout
     while time.time() < end:
         el = find_text(driver, text, contains=contains)
@@ -221,25 +229,32 @@ def tap_text_center(driver: webdriver.Remote, text: str, contains: bool = False,
             y = int(rect["y"] + rect["height"] / 2)
             log(f"tap: {text} at {x},{y}")
             driver.execute_script("mobile: clickGesture", {"x": x, "y": y})
-            time.sleep(2)
+            time.sleep(0.5)
             return True
-        time.sleep(1)
+        time.sleep(0.5)
     return False
 
 
-def click_or_tap_text(driver: webdriver.Remote, text: str, contains: bool = False, timeout: int = 20) -> bool:
-    before = visible_texts(driver)
+def click_or_tap_text(driver: webdriver.Remote, text: str, contains: bool = False, timeout: int = 10) -> bool:
     if not click_text(driver, text, contains=contains, timeout=timeout):
         return False
-    time.sleep(1)
-    after = visible_texts(driver)
-    if after != before:
-        return True
-    return tap_text_center(driver, text, contains=contains, timeout=3)
+    time.sleep(0.5)
+    return True
 
 
-def click_next(driver: webdriver.Remote, timeout: int = 20) -> bool:
-    return click_text(driver, "NEXT", timeout=timeout) or click_text(driver, "Next", timeout=timeout)
+def click_next(driver: webdriver.Remote, timeout: int = 10) -> bool:
+    """填完表单后立刻找 Next 按钮点击，不做长时间轮询。"""
+    for label in ("Next", "NEXT", "next"):
+        el = find_text(driver, label)
+        if el:
+            try:
+                log(f"click: {label}")
+                el.click()
+                time.sleep(0.5)
+                return True
+            except (StaleElementReferenceException, WebDriverException):
+                pass
+    return click_text(driver, "Next", timeout=timeout)
 
 
 def require_page(driver: webdriver.Remote, needles: list[str], title: str, timeout: int = 30) -> list[str]:
@@ -336,10 +351,10 @@ def wait_until_any(driver: webdriver.Remote, needles: list[str], timeout: int = 
 
 
 def select_spinner_item(driver: webdriver.Remote, field_text: str, item_text: str) -> bool:
-    if not click_or_tap_text(driver, field_text, contains=True, timeout=10):
+    if not click_or_tap_text(driver, field_text, contains=True, timeout=5):
         return False
-    time.sleep(1)
-    return click_or_tap_text(driver, item_text, contains=True, timeout=10)
+    time.sleep(0.5)
+    return click_or_tap_text(driver, item_text, contains=True, timeout=5)
 
 
 def select_spinner_by_index(driver: webdriver.Remote, index: int, item_text: str) -> bool:
@@ -359,10 +374,12 @@ def proceed_gmail_onboarding(driver: webdriver.Remote) -> None:
     for _ in range(12):
         texts = dump_state(driver, "gmail onboarding")
         joined = "\n".join(texts)
-        if "Welcome to Gmail" in joined and "SKIP" in texts:
+        if ("Welcome to Gmail" in joined or "New in Gmail" in joined) and "SKIP" in texts:
             click_text(driver, "SKIP", timeout=5)
-        elif "Welcome to Gmail" in joined and "Next" in texts:
+        elif ("Welcome to Gmail" in joined or "New in Gmail" in joined) and "Next" in texts:
             click_text(driver, "Next", timeout=5)
+        elif ("Welcome to Gmail" in joined or "New in Gmail" in joined) and "GOT IT" in texts:
+            click_text(driver, "GOT IT", timeout=5)
         elif "GOT IT" in texts:
             click_text(driver, "GOT IT", timeout=5)
         elif "OK" in texts and "Please add at least one email address." in joined:
@@ -378,7 +395,7 @@ def proceed_gmail_onboarding(driver: webdriver.Remote) -> None:
         elif "Basic information" in joined or "Enter your name" in joined:
             return
         else:
-            break
+            time.sleep(3)
 
 
 def complete_post_phone_flow(driver: webdriver.Remote, accept_terms: bool) -> str:
@@ -443,8 +460,10 @@ def create_account_flow(
 ) -> str:
     proceed_gmail_onboarding(driver)
 
+    # 等 Sign-in 页面真正加载完（"Checking info..." 过渡页可能延迟数秒）
+    wait_until_any(driver, ["Sign in", "Create account", "Enter your name", "Basic information"], timeout=60)
     texts = dump_state(driver, "google sign-in")
-    if any("Sign in" in t for t in texts):
+    if any("Sign in" in t or "Create account" in t for t in texts):
         if not click_or_tap_text(driver, "Create account", contains=True, timeout=20):
             raise RuntimeError("Could not find Create account on Google sign-in page")
         if stop_after_create_account:
@@ -460,23 +479,79 @@ def create_account_flow(
             input_edittexts(driver, [account.first_name, account.last_name])
         else:
             input_by_resource_id(driver, "lastName", account.last_name, timeout=5)
-        click_next(driver, timeout=20)
+        click_next(driver)
 
     require_page(driver, ["Basic information", "birthday", "gender"], "birthday page", timeout=45)
     dump_state(driver, "birthday page")
-    if not select_spinner_item(driver, "Month", account.month):
-        if not select_spinner_by_index(driver, 0, account.month):
-            raise RuntimeError("Could not select birth month")
-    if not input_by_resource_id(driver, "day", str(account.day), timeout=5):
-        if not input_by_text_hint(driver, "Day", str(account.day), timeout=8):
-            raise RuntimeError("Could not fill birth day")
-    if not input_by_resource_id(driver, "year", str(account.year), timeout=5):
-        if not input_by_text_hint(driver, "Year", str(account.year), timeout=8):
-            raise RuntimeError("Could not fill birth year")
-    if not select_spinner_item(driver, "Gender", "Rather not say"):
-        if not select_spinner_by_index(driver, 1, "Rather not say"):
-            select_spinner_by_index(driver, 1, "Prefer not to say")
-    click_next(driver, timeout=20)
+
+    # Google 注册页在 WebView 里渲染，原生 Spinner 操作月份经常失效。
+    # 优先切到 WEBVIEW context 用 web select 操作，最可靠。
+    month_num = MONTHS.index(account.month) + 1 if account.month in MONTHS else 1
+    bday_filled_via_web = False
+    try:
+        contexts = driver.contexts
+        log(f"available contexts: {contexts}")
+        webview_ctx = next((c for c in contexts if "WEBVIEW" in c), None)
+        if webview_ctx:
+            driver.switch_to.context(webview_ctx)
+            time.sleep(1)
+            # Month: <select id="month"> or first <select>
+            from selenium.webdriver.support.ui import Select
+            selects = driver.find_elements(By.TAG_NAME, "select")
+            if selects:
+                Select(selects[0]).select_by_value(str(month_num))
+                log(f"web select month: {month_num}")
+            # Day
+            day_input = driver.find_elements(By.CSS_SELECTOR, "input#day, input[name='day']")
+            if day_input:
+                day_input[0].clear()
+                day_input[0].send_keys(str(account.day))
+            # Year
+            year_input = driver.find_elements(By.CSS_SELECTOR, "input#year, input[name='year']")
+            if year_input:
+                year_input[0].clear()
+                year_input[0].send_keys(str(account.year))
+            # Gender: <select id="gender"> or second <select>
+            if len(selects) > 1:
+                Select(selects[1]).select_by_value("3")
+            bday_filled_via_web = True
+            driver.switch_to.context("NATIVE_APP")
+            time.sleep(1)
+            click_next(driver)
+    except Exception as e:
+        log(f"webview birthday fill failed: {e}, falling back to native")
+        try:
+            driver.switch_to.context("NATIVE_APP")
+        except Exception:
+            pass
+
+    if not bday_filled_via_web:
+        # 原生模式 fallback
+        for _retry in range(3):
+            if select_spinner_item(driver, "Month", account.month):
+                break
+            time.sleep(1)
+            if select_spinner_by_index(driver, 0, account.month):
+                break
+            time.sleep(1)
+        time.sleep(1)
+        if not input_by_resource_id(driver, "day", str(account.day), timeout=5):
+            if not input_by_text_hint(driver, "Day", str(account.day), timeout=8):
+                raise RuntimeError("Could not fill birth day")
+        if not input_by_resource_id(driver, "year", str(account.year), timeout=5):
+            if not input_by_text_hint(driver, "Year", str(account.year), timeout=8):
+                raise RuntimeError("Could not fill birth year")
+        if not select_spinner_item(driver, "Gender", "Rather not say"):
+            if not select_spinner_by_index(driver, 1, "Rather not say"):
+                select_spinner_by_index(driver, 1, "Prefer not to say")
+        click_next(driver)
+
+    time.sleep(2)
+    retry_texts = visible_texts(driver)
+    retry_joined = "\n".join(retry_texts).lower()
+    if "please fill in a complete birthday" in retry_joined:
+        log("birthday still incomplete after retry")
+        raise RuntimeError("Could not fill birthday — month selection keeps failing")
 
     require_page(
         driver,
@@ -485,10 +560,18 @@ def create_account_flow(
         timeout=90,
     )
     texts = dump_state(driver, "gmail address page")
-    desired = f"{account.username}@gmail.com"
-    if any(desired == text for text in texts):
-        click_text(driver, desired, timeout=10)
-    elif "How you'll sign in" in "\n".join(texts) or any("@gmail.com" in text for text in texts):
+    joined = "\n".join(texts)
+    # 优先选 Google 推荐的完整邮箱地址（排除纯 "@gmail.com" 后缀标签）
+    suggested = [t for t in texts if "@gmail.com" in t and t.strip() != "@gmail.com" and len(t) > len("@gmail.com")]
+    if suggested:
+        chosen = suggested[0]
+        log(f"selecting suggested address: {chosen}")
+        if click_text(driver, chosen, timeout=10):
+            account.username = chosen.replace("@gmail.com", "")
+        else:
+            click_or_tap_text(driver, chosen, contains=True, timeout=10)
+            account.username = chosen.replace("@gmail.com", "")
+    elif "How you" in joined and "sign in" in joined.lower():
         if not input_edittext_index(driver, 0, account.username, timeout=10):
             if not input_by_text_hint(driver, "Gmail address", account.username, timeout=5):
                 input_by_text_hint(driver, "Username", account.username, timeout=5)
@@ -503,7 +586,7 @@ def create_account_flow(
             raise RuntimeError("Could not find or enter a Gmail address")
         account.username = candidate.removesuffix("@gmail.com")
         click_text(driver, candidate, timeout=10)
-    click_next(driver, timeout=20)
+    click_next(driver)
 
     require_page(driver, ["Create a strong password", "Password", "Show password"], "password page", timeout=90)
     dump_state(driver, "password page")
@@ -515,7 +598,7 @@ def create_account_flow(
         if not input_by_text_hint(driver, "Password", account.password, timeout=10):
             raise RuntimeError("Could not fill password")
         input_by_text_hint(driver, "Confirm", account.password, timeout=5)
-    click_next(driver, timeout=20)
+    click_next(driver)
 
     texts = wait_until_any(
         driver,

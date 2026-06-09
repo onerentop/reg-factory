@@ -721,6 +721,9 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False):
             # French month names
             month_names_fr = ["", "janvier", "février", "mars", "avril", "mai", "juin",
                               "juillet", "août", "septembre", "octobre", "novembre", "décembre"]
+            # German month names (Outlook 界面随出口 IP 国家本地化，DE 节点为德语)
+            month_names_de = ["", "Januar", "Februar", "März", "April", "Mai", "Juni",
+                              "Juli", "August", "September", "Oktober", "November", "Dezember"]
 
             # Find all visible comboboxes
             combos = page.locator('button[role="combobox"], [role="combobox"]')
@@ -776,6 +779,8 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False):
                             month_opt = page.locator(f'[role="option"]:has-text("{month_names_en[month]}")').first
                         if await month_opt.count() == 0:
                             month_opt = page.locator(f'[role="option"]:has-text("{month_names_fr[month]}")').first
+                        if await month_opt.count() == 0:
+                            month_opt = page.locator(f'[role="option"]:has-text("{month_names_de[month]}")').first
                         if await month_opt.count() == 0:
                             month_opt = page.locator(f'[role="option"]:has-text("{month}")').first
                         if await month_opt.count() > 0:
@@ -1233,6 +1238,19 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False):
                             continue
                         except Exception:
                             pass
+
+                # 3. CapSolver FunCaptcha / Arkose (PerimeterX 不可用时的 fallback)
+                if not arkose_solved and CAPSOLVER_API_KEY:
+                    print(f"  {tag} trying capsolver FunCaptcha...")
+                    fc_token = solve_arkose_capsolver(
+                        public_key=MS_SIGNUP_ARKOSE_KEY,
+                        page_url=page.url,
+                    )
+                    if fc_token:
+                        await inject_arkose_token(page, fc_token)
+                        await asyncio.sleep(5)
+                        arkose_solved = True
+                        continue
 
                 # None of the solvers worked.
                 if captcha_early_abort:

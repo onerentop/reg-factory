@@ -24,10 +24,13 @@ from config import (
 )
 
 
-def get_phone(project_id, hero_service, country_prefer=("",), country_blacklist=(), max_retries=5, max_price="0"):
+def get_phone(project_id, hero_service, country_prefer=("",), country_blacklist=(),
+              max_retries=5, max_price="0", hero_country=None, hero_operator=None,
+              hero_fixed_price=False):
     """返回 (phone, country_code, pkey)。firefox.fun 优先，没号转 hero-sms。
     hero-sms 的 phone 已含国家码、country_code 返回 ''。
-    max_price: firefox.fun 价格上限，'0' 只取最便宜(常是垃圾号段)，给够才摸得到好国家。"""
+    max_price: firefox.fun 价格上限，'0' 只取最便宜(常是垃圾号段)，给够才摸得到好国家。
+    hero_country: 指定 hero-sms 国家 ID（如 '52'=泰国）；None=按价格自动选(最便宜常被 Google 拒)。"""
     if SMS_TOKEN and project_id:
         for country in country_prefer:
             attempts = max_retries if country == "" else 1
@@ -56,7 +59,8 @@ def get_phone(project_id, hero_service, country_prefer=("",), country_blacklist=
                 break
 
     print("  [sms] firefox.fun 无号/未配，转 hero-sms...")
-    res = _hero_get_phone(hero_service)
+    res = _hero_get_phone(hero_service, country_override=hero_country,
+                          operator=hero_operator, max_price=max_price, fixed_price=hero_fixed_price)
     if res:
         full_phone, pkey = res
         return full_phone, "", pkey
@@ -93,8 +97,33 @@ def release(pkey):
 
 
 # ---------------- hero-sms ----------------
-def _hero_get_phone(service):
+def _hero_get_phone(service, country_override=None, operator=None, max_price=None, fixed_price=False):
     if not (HERO_SMS_API_KEY and service):
+        return None
+    # 指定国家(可指定运营商/价格档取更干净号池)：直接取，跳过价格排序
+    if country_override is not None:
+        params = {
+            "api_key": HERO_SMS_API_KEY, "action": "getNumber",
+            "service": service, "country": str(country_override),
+        }
+        if operator:
+            params["operator"] = operator
+        if max_price and str(max_price) not in ("0", "0.0", ""):
+            params["maxPrice"] = str(max_price)
+            # fixedPrice=true 配 maxPrice：严格按该价档买(不取最便宜)，命中指定号池
+            if fixed_price:
+                params["fixedPrice"] = "true"
+        try:
+            r = requests.get(HERO_SMS_API_BASE, params=params, timeout=30)
+            text = r.text.strip()
+            if text.startswith("ACCESS_NUMBER:"):
+                _, act_id, full_phone = text.split(":")[:3]
+                tag = f"country={country_override}" + (f"/{operator}" if operator else "")
+                print(f"  [hero-sms] {tag}: +{full_phone} (id={act_id})")
+                return full_phone, f"hero_{act_id}"
+            print(f"  [hero-sms] country={country_override} op={operator}: {text}")
+        except Exception as e:
+            print(f"  [hero-sms] err country={country_override}: {e}")
         return None
     countries = HERO_SMS_COUNTRY_PREFER
     try:
