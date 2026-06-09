@@ -248,9 +248,32 @@ export default function AccountsPage() {
     {
       title: '操作',
       key: 'action',
-      width: 120,
+      width: 200,
       render: (_: any, record: Account) => (
         <Space>
+          {record.status === 'success' && (
+            <Button size="small" type="link" onClick={async () => {
+              message.loading({ content: '正在提取 Token...', key: 'extract' })
+              try {
+                const resp = await fetch('/api/tools/extract-graph-token', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ account_id: record.id }),
+                })
+                const data = await resp.json()
+                if (data.data?.success) {
+                  message.success({ content: 'Token 提取成功！', key: 'extract' })
+                  fetchAccounts()
+                } else {
+                  message.error({ content: `Token 提取失败: ${data.data?.error || '未知'}`, key: 'extract' })
+                }
+              } catch {
+                message.error({ content: '请求失败', key: 'extract' })
+              }
+            }}>
+              提取Token
+            </Button>
+          )}
           {record.status === 'failed' && (
             <Button size="small" type="link" onClick={() => handleBatchRetry()}>
               重试

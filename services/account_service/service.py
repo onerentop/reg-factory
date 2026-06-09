@@ -124,12 +124,14 @@ class AccountService:
         return AccountRead(
             id=str(account.id),
             email=account.email,
+            password=account.password,
             platform=account.platform.value,
             status=account.status.value,
             current_step=account.current_step,
             total_steps=account.total_steps,
             error_message=account.error_message,
             proxy_used=account.proxy_used,
+            tokens=account.tokens,
             created_at=account.created_at,
             steps=steps,
         )

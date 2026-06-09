@@ -15,12 +15,14 @@ class StepRead(BaseModel):
 class AccountRead(BaseModel):
     id: str
     email: str
+    password: str | None = None
     platform: str
     status: str
     current_step: int
     total_steps: int
     error_message: str | None = None
     proxy_used: str | None = None
+    tokens: dict | None = None
     created_at: datetime | None = None
     steps: list[StepRead] = []
     model_config = {"from_attributes": True}

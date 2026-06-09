@@ -381,6 +381,43 @@ async def validate_keys(body: dict):
     return ApiResponse(data={"task_id": task.id, "status": "queued"})
 
 
+@app.post("/tools/extract-graph-token", response_model=ApiResponse)
+async def extract_graph_token_api(body: dict):
+    """提取 Outlook Graph API refresh_token（纯 HTTP，无需浏览器）。
+    传 account_id 自动从 Account Service 查密码；或直接传 email+password。"""
+    email = body.get("email", "")
+    password = body.get("password", "")
+    account_id = body.get("account_id", "")
+
+    if account_id and not password:
+        try:
+            async with _httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(f"{_ACCOUNT_URL}/accounts/{account_id}")
+                acct = resp.json().get("data", {})
+                email = email or acct.get("email", "")
+                password = acct.get("password", "")
+        except Exception:
+            pass
+
+    if not email or not password:
+        raise HTTPException(status_code=400, detail="email and password required")
+
+    from shared.uploaders.graph_token_extractor import GraphTokenExtractor
+    extractor = GraphTokenExtractor()
+    result = await extractor.extract(email, password)
+
+    if result["success"] and account_id:
+        try:
+            async with _httpx.AsyncClient(timeout=10) as client:
+                await client.put(f"{_ACCOUNT_URL}/accounts/{account_id}", json={
+                    "tokens": {"refresh_token": result["refresh_token"]},
+                })
+        except Exception:
+            pass
+
+    return ApiResponse(data=result)
+
+
 @app.post("/tools/activate-plus", response_model=ApiResponse)
 async def activate_plus(body: dict):
     from worker.tasks import activate_plus_account
