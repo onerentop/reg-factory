@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Card, Row, Col, Statistic, Table, Tag, Spin } from 'antd'
+import { Card, Row, Col, Statistic, Table, Tag, Spin, message } from 'antd'
+import { wsClient } from '../websocket/WebSocketClient'
 import {
   UserOutlined,
   CheckCircleOutlined,
@@ -17,7 +18,7 @@ interface DashboardData {
 export default function DashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
-  const [activities] = useState<any[]>([])
+  const [activities, setActivities] = useState<any[]>([])
 
   useEffect(() => {
     setLoading(true)
@@ -26,6 +27,17 @@ export default function DashboardPage() {
       .then((res) => setData(res.data))
       .catch(() => setData(null))
       .finally(() => setLoading(false))
+  }, [])
+
+  useEffect(() => {
+    wsClient.connect()
+    const unsubReg = wsClient.on('registration', (data: any) => {
+      setActivities(prev => [{ key: Date.now().toString(), ...data }, ...prev].slice(0, 20))
+    })
+    const unsubAlert = wsClient.on('alert', (data: any) => {
+      message.warning(data.message || '收到告警')
+    })
+    return () => { unsubReg(); unsubAlert() }
   }, [])
 
   const activityColumns = [

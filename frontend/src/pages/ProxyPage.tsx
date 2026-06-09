@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Table, Button, Modal, Form, Input, Select, Tag, Space, message, Popconfirm } from 'antd'
 import { PlusOutlined, DeleteOutlined, ThunderboltOutlined } from '@ant-design/icons'
 
@@ -16,24 +16,36 @@ interface Proxy {
 export default function ProxyPage() {
   const [proxies, setProxies] = useState<Proxy[]>([])
   const [addVisible, setAddVisible] = useState(false)
+
+  useEffect(() => {
+    fetch('/api/proxy').then(r => r.json())
+      .then(res => setProxies((res.data || []).map((p: any) => ({ ...p, id: p.id || Date.now().toString() }))))
+      .catch(() => {})
+  }, [])
   const [form] = Form.useForm()
 
   const addProxy = async () => {
     const values = await form.validateFields()
-    const newProxy: Proxy = {
-      id: Date.now().toString(),
-      ...values,
-      status: 'unknown',
-    }
-    setProxies([...proxies, newProxy])
-    setAddVisible(false)
-    form.resetFields()
-    message.success('代理已添加')
+    try {
+      const resp = await fetch('/api/proxy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(values),
+      })
+      const data = await resp.json()
+      setProxies([...proxies, { id: data.data?.id || Date.now().toString(), ...values, status: 'unknown' }])
+      setAddVisible(false)
+      form.resetFields()
+      message.success('代理已添加')
+    } catch { message.error('添加失败') }
   }
 
-  const removeProxy = (id: string) => {
-    setProxies(proxies.filter(p => p.id !== id))
-    message.success('已删除')
+  const removeProxy = async (id: string) => {
+    try {
+      await fetch(`/api/proxy/${id}`, { method: 'DELETE' })
+      setProxies(proxies.filter(p => p.id !== id))
+      message.success('已删除')
+    } catch { message.error('删除失败') }
   }
 
   const testProxy = (id: string) => {
