@@ -402,20 +402,31 @@ async def extract_graph_token_api(body: dict):
     if not email or not password:
         raise HTTPException(status_code=400, detail="email and password required")
 
-    from shared.uploaders.graph_token_extractor import GraphTokenExtractor
-    extractor = GraphTokenExtractor()
-    result = await extractor.extract(email, password)
+    import asyncio
+    from worker.legacy_bridge import LegacyBridge
+    bridge = LegacyBridge()
+    bridge.ensure_importable()
+    try:
+        import config as _lc  # noqa
+    except Exception:
+        pass
 
-    if result["success"] and account_id:
-        try:
-            async with _httpx.AsyncClient(timeout=10) as client:
-                await client.put(f"{_ACCOUNT_URL}/accounts/{account_id}", json={
-                    "tokens": {"refresh_token": result["refresh_token"]},
-                })
-        except Exception:
-            pass
+    from extract_graph_tokens import get_graph_token
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, get_graph_token, email, password, 0)
 
-    return ApiResponse(data=result)
+    if result and result.get("refresh_token"):
+        if account_id:
+            try:
+                async with _httpx.AsyncClient(timeout=10) as client:
+                    await client.put(f"{_ACCOUNT_URL}/accounts/{account_id}", json={
+                        "tokens": {"refresh_token": result["refresh_token"]},
+                    })
+            except Exception:
+                pass
+        return ApiResponse(data={"success": True, "email": email, "refresh_token": result["refresh_token"][:20] + "..."})
+
+    return ApiResponse(data={"success": False, "email": email, "error": str(result) if result else "Failed to get token"})
 
 
 @app.post("/tools/activate-plus", response_model=ApiResponse)
