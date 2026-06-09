@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Table, Tag, Button, Modal, Form, Input, Select, Switch, Card, Tabs, message } from 'antd'
+import { Table, Tag, Button, Modal, Form, Input, Select, Switch, Tabs, message } from 'antd'
 import { PlusOutlined, BellOutlined } from '@ant-design/icons'
 
 interface AlertRule {

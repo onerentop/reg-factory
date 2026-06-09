@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Table, Button, Tag, Switch, Modal, Form, Input, Select, InputNumber, message, Space } from 'antd'
+import { Table, Button, Tag, Switch, Modal, Form, Input, Select, message } from 'antd'
 import { PlusOutlined, PlayCircleOutlined, ClockCircleOutlined } from '@ant-design/icons'
 
 interface ScheduleTask {
@@ -38,7 +38,7 @@ export default function SchedulesPage() {
     { title: 'Cron 表达式', dataIndex: 'cron', key: 'cron', render: (c: string) => <code>{c}</code> },
     { title: '启用', key: 'enabled', render: (_: any, record: ScheduleTask) => <Switch checked={record.enabled} onChange={() => toggleEnable(record.id)} /> },
     { title: '上次运行', dataIndex: 'last_run', key: 'last_run', render: (t: string | null) => t || '从未' },
-    { title: '操作', key: 'action', render: (_: any, record: ScheduleTask) => (
+    { title: '操作', key: 'action', render: (_: any, _record: ScheduleTask) => (
       <Button size="small" type="link" icon={<PlayCircleOutlined />}>立即执行</Button>
     )},
   ]

@@ -8,7 +8,7 @@ import {
   PlusOutlined,
   SearchOutlined,
 } from '@ant-design/icons'
-import type { Account, Step } from '../api/accounts'
+import type { Account } from '../api/accounts'
 
 const { Search } = Input
 
