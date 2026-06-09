@@ -105,18 +105,33 @@ def get_graph_token(email, password, idx=0):
             "i19": "16393",
         }
 
-        resp2 = session.post(post_url, data=login_data, timeout=30, allow_redirects=True)
+        resp2 = session.post(post_url, data=login_data, timeout=30, allow_redirects=False)
+
+        # Follow redirects manually to catch localhost redirect
+        while resp2.status_code in (301, 302, 303, 307):
+            loc = resp2.headers.get("Location", "")
+            if "localhost" in loc:
+                resp2 = type('R', (), {'url': loc, 'text': '', 'status_code': 200})()
+                break
+            resp2 = session.get(loc, timeout=30, allow_redirects=False)
 
         # Follow JS auto-submit intermediate pages (Microsoft uses onload="DoSubmit()" forms)
         for _ in range(5):
-            _html = resp2.text or ''
+            _html = resp2.text if hasattr(resp2, 'text') and resp2.text else ''
             if ('DoSubmit' in _html or ('fmHF' in _html and 'onload' in _html)) and 'action=' in _html:
                 _m = re.search(r'action="([^"]+)"', _html)
                 if _m:
                     _fa = _m.group(1).replace('&amp;', '&')
                     _hid = re.findall(r'<input[^>]*name="([^"]*)"[^>]*value="([^"]*)"', _html)
                     _fd = {n: v for n, v in _hid}
-                    resp2 = session.post(_fa, data=_fd, timeout=30, allow_redirects=True)
+                    resp2 = session.post(_fa, data=_fd, timeout=30, allow_redirects=False)
+                    # catch localhost redirect after form submit
+                    while resp2.status_code in (301, 302, 303, 307):
+                        loc = resp2.headers.get("Location", "")
+                        if "localhost" in loc:
+                            resp2 = type('R', (), {'url': loc, 'text': '', 'status_code': 200})()
+                            break
+                        resp2 = session.get(loc, timeout=30, allow_redirects=False)
                     continue
             break
 

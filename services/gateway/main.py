@@ -411,6 +411,11 @@ async def extract_graph_token_api(body: dict):
     except Exception:
         pass
 
+    import os
+    if not os.environ.get("HTTPS_PROXY"):
+        os.environ.setdefault("HTTPS_PROXY", "http://127.0.0.1:7897")
+        os.environ.setdefault("HTTP_PROXY", "http://127.0.0.1:7897")
+
     from extract_graph_tokens import get_graph_token
     loop = asyncio.get_event_loop()
     result = await loop.run_in_executor(None, get_graph_token, email, password, 0)
