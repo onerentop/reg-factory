@@ -134,23 +134,28 @@ export default function AccountsPage() {
       const taskIds: string[] = data.data?.task_ids || []
       if (taskIds.length > 0) {
         setTaskId(taskIds[0])
-        setTaskStatus(`${taskIds.length} 个任务并发中...`)
-        setLogLines(prev => [...prev, `[调度] 已提交 ${taskIds.length} 个并发任务`])
+        setTaskStatus(`已提交 ${taskIds.length} 个注册任务（串行队列）`)
+        setLogLines(prev => [...prev, `[调度] 已提交 ${taskIds.length} 个任务，依次执行`])
 
-        // 为每个任务连接 WebSocket 日志
-        taskIds.forEach((tid, i) => {
-          setLogLines(prev => [...prev, `[#${i}] 任务 ${tid.slice(0, 8)}... 开始`])
-          const ws = new WebSocket(`ws://${window.location.hostname}:8000/ws/task/${tid}/logs`)
-          ws.onmessage = (e) => {
+        // 当前正在连日志的任务索引
+        let currentWsIdx = -1
+        let currentWs: WebSocket | null = null
+
+        const connectLog = (idx: number) => {
+          if (idx >= taskIds.length) return
+          currentWsIdx = idx
+          setLogLines(prev => [...prev, ``, `━━━ 任务 #${idx + 1}/${taskIds.length} ━━━`])
+          currentWs = new WebSocket(`ws://${window.location.hostname}:8000/ws/task/${taskIds[idx]}/logs`)
+          currentWs.onmessage = (e) => {
             try {
               const d = JSON.parse(e.data)
-              if (d.type === 'log' && d.message) {
-                setLogLines(prev => [...prev, `[#${i}] ${d.message}`].slice(-300))
-              }
-              if (d.type === 'done') ws.close()
-            } catch { setLogLines(prev => [...prev, `[#${i}] ${e.data}`]) }
+              if (d.type === 'log' && d.message) setLogLines(prev => [...prev, d.message].slice(-300))
+              if (d.type === 'done') currentWs?.close()
+            } catch { setLogLines(prev => [...prev, e.data]) }
           }
-        })
+        }
+
+        connectLog(0)
 
         // 轮询所有任务状态
         const completed = new Set<string>()
@@ -167,13 +172,17 @@ export default function AccountsPage() {
                 results[tid] = d.data?.result || {}
                 const idx = taskIds.indexOf(tid)
                 if (s === 'SUCCESS' && d.data?.result?.success) {
-                  const email = d.data.result.email || ''
-                  setLogLines(prev => [...prev, `[#${idx}] 🎉 成功: ${email}`])
+                  setLogLines(prev => [...prev, `🎉 #${idx + 1} 成功: ${d.data.result.email || ''}`])
                 } else {
                   const err = d.data?.result?.steps?.find((st: any) => !st.success)?.error || d.data?.error || '失败'
-                  setLogLines(prev => [...prev, `[#${idx}] 💥 ${err}`])
+                  setLogLines(prev => [...prev, `💥 #${idx + 1} ${err}`])
                 }
                 setTaskStatus(`完成 ${completed.size}/${taskIds.length}`)
+                // 连接下一个未完成任务的日志
+                const nextIdx = taskIds.findIndex((t, i) => i > idx && !completed.has(t))
+                if (nextIdx >= 0 && nextIdx !== currentWsIdx) {
+                  connectLog(nextIdx)
+                }
               }
             } catch {}
           }
