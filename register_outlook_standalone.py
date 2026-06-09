@@ -399,7 +399,7 @@ async def extract_graph_token(page, context, email, password, idx=0):
             f"&response_type=code"
             f"&redirect_uri={urllib.parse.quote(GRAPH_REDIRECT_URI, safe='')}"
             f"&scope={urllib.parse.quote(GRAPH_SCOPE)}"
-            f"&prompt=login"
+            f"&prompt=consent"
         )
         print(f"  {tag} [graph] navigating to OAuth consent...")
         # 拦截 nativeclient redirect（浏览器会报 chrome-error，但我们只需要 URL 里的 code）
@@ -1390,15 +1390,9 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False):
             print(f"  {tag} verification failed, discarding account")
             return None, None
 
-        # Graph token 提取（best-effort，不阻塞注册）
+        # Graph token 提取（best-effort，注册后 session 已有登录态，prompt=consent 直接授权）
         graph = None
         try:
-            # warmup：短超时，失败也继续
-            try:
-                await page.goto("https://outlook.live.com/mail/0/inbox", timeout=15000, wait_until="domcontentloaded")
-                await asyncio.sleep(3)
-            except Exception:
-                pass
             graph = await extract_graph_token(page, context, email, password, idx)
         except Exception as e:
             print(f"  {tag} [graph] extraction error: {e}")
