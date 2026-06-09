@@ -148,35 +148,47 @@ async def drive_to_phone(page, profile):
     log(f"[browser] 资料: {first} {last} / {pw} / {year}-{month:02d}-{day:02d}")
 
     # ---- 姓名 ----
-    if await fill_first(page, ['input[name=firstName]', 'input#firstName'], first):
-        await fill_first(page, ['input[name=lastName]', 'input#lastName'], last, 4000)
-        await click_next(page)
-        log("[browser] 姓名已提交")
-        await wait_url(page, "birthdaygender", 25)
-        await asyncio.sleep(1.5)
+    for _name_try in range(3):
+        if await fill_first(page, ['input[name=firstName]', 'input#firstName'], first):
+            await fill_first(page, ['input[name=lastName]', 'input#lastName'], last, 4000)
+            await click_next(page)
+            log("[browser] 姓名已提交")
+            await wait_url(page, "birthdaygender", 25)
+            await asyncio.sleep(1.5)
+            break
+        else:
+            log(f"[browser] 姓名填充失败({_name_try+1}/3)，刷新重试", "WARN")
+            await page.reload(wait_until="domcontentloaded", timeout=30000)
+            await asyncio.sleep(3)
 
     # ---- 生日性别 ----
-    if await fill_first(page, ['input#day', 'input[name=day]'], str(day), 20000):
-        await fill_first(page, ['input#year', 'input[name=year]'], str(year), 4000)
-        # 月份(Material 下拉)：点开 → 按文本"N 月"精确点
-        try:
-            await page.click('#month', timeout=3000)
-            await asyncio.sleep(0.6)
-            await page.get_by_role('option', name=f'{month} 月', exact=True).click(timeout=3000)
-        except Exception as e:
-            log(f"[browser] 月份选择失败: {e}", "WARN")
-        await asyncio.sleep(0.4)
-        # 性别 → 男
-        try:
-            await page.click('#gender', timeout=2500)
-            await asyncio.sleep(0.6)
-            await page.get_by_role('option', name='男', exact=True).click(timeout=3000)
-        except Exception as e:
-            log(f"[browser] 性别选择失败: {e}", "WARN")
-        await asyncio.sleep(0.4)
-        await click_next(page)
-        log("[browser] 生日已提交")
-        await wait_url(page, "username", 25)
+    for _bday_try in range(3):
+        if await fill_first(page, ['input#day', 'input[name=day]'], str(day), 20000):
+            await fill_first(page, ['input#year', 'input[name=year]'], str(year), 4000)
+            # 月份(Material 下拉)：点开 → 按文本"N 月"精确点
+            try:
+                await page.click('#month', timeout=3000)
+                await asyncio.sleep(0.6)
+                await page.get_by_role('option', name=f'{month} 月', exact=True).click(timeout=3000)
+            except Exception as e:
+                log(f"[browser] 月份选择失败: {e}", "WARN")
+            await asyncio.sleep(0.4)
+            # 性别 → 男
+            try:
+                await page.click('#gender', timeout=2500)
+                await asyncio.sleep(0.6)
+                await page.get_by_role('option', name='男', exact=True).click(timeout=3000)
+            except Exception as e:
+                log(f"[browser] 性别选择失败: {e}", "WARN")
+            await asyncio.sleep(0.4)
+            await click_next(page)
+            log("[browser] 生日已提交")
+            await wait_url(page, "username", 25)
+            break
+        else:
+            log(f"[browser] 生日填充失败({_bday_try+1}/3)，刷新重试", "WARN")
+            await page.reload(wait_until="domcontentloaded", timeout=30000)
+            await asyncio.sleep(3)
 
     # ---- 用户名（两变体：输入框 / 选择列表）----
     await wait_url(page, "username", 25)
@@ -212,10 +224,16 @@ async def drive_to_phone(page, profile):
     # ---- 密码（单框，无确认）----
     await wait_url(page, "password", 25)
     await asyncio.sleep(1)
-    if await fill_first(page, ['input[name=Passwd]', 'input[type=password]'], pw):
-        await click_next(page)
-        log("[browser] 密码已提交")
-        await asyncio.sleep(3)
+    for _pw_try in range(3):
+        if await fill_first(page, ['input[name=Passwd]', 'input[type=password]'], pw):
+            await click_next(page)
+            log("[browser] 密码已提交")
+            await asyncio.sleep(3)
+            break
+        else:
+            log(f"[browser] 密码填充失败({_pw_try+1}/3)，刷新重试", "WARN")
+            await page.reload(wait_until="domcontentloaded", timeout=30000)
+            await asyncio.sleep(3)
     return True
 
 
