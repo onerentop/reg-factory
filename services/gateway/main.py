@@ -399,33 +399,25 @@ async def proxy_config(request: Request, path: str):
 
 @app.post("/register/outlook", response_model=ApiResponse)
 async def trigger_outlook_registration(body: dict = {}):
-    """从前端触发 Outlook 注册。并发 dispatch 多个单号任务。"""
-    from worker.tasks import register_outlook_single
+    """从前端触发 Outlook 注册。用 multiprocessing 真并发。"""
+    from worker.process_manager import task_manager, _fetch_proxy_from_manager
     count = body.get("count", 1)
     proxy = body.get("proxy", "")
     config = body.get("config", {})
+    if not proxy:
+        proxy = _fetch_proxy_from_manager()
     task_ids = []
     for i in range(count):
-        task = register_outlook_single.delay(i, proxy, config)
-        task_ids.append(task.id)
-    return ApiResponse(data={"task_ids": task_ids, "status": "queued", "count": count})
+        tid = task_manager.submit(idx=i, proxy=proxy, config=config)
+        task_ids.append(tid)
+    return ApiResponse(data={"task_ids": task_ids, "status": "running", "count": count})
 
 
 @app.get("/tasks/{task_id}", response_model=ApiResponse)
 async def get_task_status(task_id: str):
-    """查询 Celery 任务状态和结果。"""
-    from worker.tasks import celery_app as _celery
-    result = _celery.AsyncResult(task_id)
-    data = {
-        "task_id": task_id,
-        "status": result.status,
-        "ready": result.ready(),
-    }
-    if result.ready():
-        if result.successful():
-            data["result"] = result.result
-        else:
-            data["error"] = str(result.result)
+    """查询任务状态（进程管理器）。"""
+    from worker.process_manager import task_manager
+    data = task_manager.get_status(task_id)
     return ApiResponse(data=data)
 
 

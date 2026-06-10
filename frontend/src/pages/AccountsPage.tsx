@@ -137,70 +137,65 @@ export default function AccountsPage() {
         setTaskStatus(`已提交 ${taskIds.length} 个注册任务（串行队列）`)
         setLogLines(prev => [...prev, `[调度] 已提交 ${taskIds.length} 个任务，依次执行`])
 
-        // 当前正在连日志的任务索引
-        let currentWsIdx = -1
-        let currentWs: WebSocket | null = null
+        // 为每个任务连 WebSocket（日志+结果都走 WS）
+        const completed = new Set<string>()
+        const allResults: Record<string, any> = {}
 
-        const connectLog = (idx: number) => {
-          if (idx >= taskIds.length) return
-          currentWsIdx = idx
+        const connectTask = (idx: number) => {
+          const tid = taskIds[idx]
           setLogLines(prev => [...prev, ``, `━━━ 任务 #${idx + 1}/${taskIds.length} ━━━`])
-          currentWs = new WebSocket(`ws://${window.location.hostname}:8000/ws/task/${taskIds[idx]}/logs`)
-          currentWs.onmessage = (e) => {
+          const ws = new WebSocket(`ws://${window.location.hostname}:8000/ws/task/${tid}/logs`)
+          ws.onmessage = (e) => {
             try {
               const d = JSON.parse(e.data)
-              if (d.type === 'log' && d.message) setLogLines(prev => [...prev, d.message].slice(-300))
-              if (d.type === 'done') currentWs?.close()
-            } catch { setLogLines(prev => [...prev, e.data]) }
+              if (d.type === 'log' && d.message) {
+                setLogLines(prev => [...prev, d.message].slice(-300))
+              }
+              if (d.type === 'result') {
+                completed.add(tid)
+                allResults[tid] = d.data || {}
+                const r = d.data || {}
+                if (r.success) {
+                  setLogLines(prev => [...prev, `🎉 #${idx + 1} 成功: ${r.email || ''}`])
+                } else {
+                  setLogLines(prev => [...prev, `💥 #${idx + 1} 失败: ${r.error || ''}`])
+                }
+                setTaskStatus(`完成 ${completed.size}/${taskIds.length}`)
+              }
+              if (d.type === 'done') {
+                ws.close()
+                // 连下一个
+                const nextIdx = idx + 1
+                if (nextIdx < taskIds.length) {
+                  connectTask(nextIdx)
+                } else {
+                  // 全部完成
+                  setRegistering(false)
+                  const okCount = Object.values(allResults).filter((r: any) => r.success).length
+                  const emails = Object.values(allResults).filter((r: any) => r.success).map((r: any) => r.email).filter(Boolean)
+                  if (okCount > 0) {
+                    message.success(`注册完成：成功 ${okCount}/${taskIds.length}`)
+                    setTaskStatus(`✅ 成功 ${okCount}/${taskIds.length}: ${emails.join(', ')}`)
+                  } else {
+                    message.error(`全部失败 (${taskIds.length} 个)`)
+                    setTaskStatus(`❌ 全部失败`)
+                  }
+                  fetchAccounts()
+                }
+              }
+            } catch {
+              setLogLines(prev => [...prev, e.data])
+            }
+          }
+          ws.onerror = () => {
+            // 连接失败时跳到下一个
+            completed.add(tid)
+            const nextIdx = idx + 1
+            if (nextIdx < taskIds.length) connectTask(nextIdx)
           }
         }
 
-        connectLog(0)
-
-        // 轮询所有任务状态
-        const completed = new Set<string>()
-        const results: Record<string, any> = {}
-        const interval = setInterval(async () => {
-          for (const tid of taskIds) {
-            if (completed.has(tid)) continue
-            try {
-              const r = await fetch(`/api/tasks/${tid}`)
-              const d = await r.json()
-              const s = d.data?.status
-              if (s === 'SUCCESS' || s === 'FAILURE') {
-                completed.add(tid)
-                results[tid] = d.data?.result || {}
-                const idx = taskIds.indexOf(tid)
-                if (s === 'SUCCESS' && d.data?.result?.success) {
-                  setLogLines(prev => [...prev, `🎉 #${idx + 1} 成功: ${d.data.result.email || ''}`])
-                } else {
-                  const err = d.data?.result?.steps?.find((st: any) => !st.success)?.error || d.data?.error || '失败'
-                  setLogLines(prev => [...prev, `💥 #${idx + 1} ${err}`])
-                }
-                setTaskStatus(`完成 ${completed.size}/${taskIds.length}`)
-                // 连接下一个未完成任务的日志
-                const nextIdx = taskIds.findIndex((t, i) => i > idx && !completed.has(t))
-                if (nextIdx >= 0 && nextIdx !== currentWsIdx) {
-                  connectLog(nextIdx)
-                }
-              }
-            } catch {}
-          }
-          if (completed.size >= taskIds.length) {
-            clearInterval(interval)
-            setRegistering(false)
-            const okCount = Object.values(results).filter((r: any) => r.success).length
-            const emails = Object.values(results).filter((r: any) => r.success).map((r: any) => r.email).filter(Boolean)
-            if (okCount > 0) {
-              message.success(`注册完成：成功 ${okCount}/${taskIds.length}`)
-              setTaskStatus(`✅ 成功 ${okCount}/${taskIds.length}: ${emails.join(', ')}`)
-            } else {
-              message.error(`全部失败 (${taskIds.length} 个)`)
-              setTaskStatus(`❌ 全部失败`)
-            }
-            fetchAccounts()
-          }
-        }, 5000)
+        connectTask(0)
       } else {
         setRegistering(false)
         message.error('提交失败')
