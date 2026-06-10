@@ -405,7 +405,8 @@ async def trigger_outlook_registration(body: dict = {}):
     proxy = body.get("proxy", "")
     config = dict(body.get("config", {}) or {})
     # 注册模式：优先取 body 顶层 mode（前端下拉），回退 config.mode，默认 browser
-    config["mode"] = body.get("mode", config.get("mode", "browser"))
+    from gateway.registration_helpers import resolve_registration_mode
+    config["mode"] = resolve_registration_mode(body)
     if not proxy:
         proxy = _fetch_proxy_from_manager()
     task_ids = []

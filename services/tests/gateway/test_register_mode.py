@@ -1,50 +1,28 @@
-import asyncio
-from gateway.main import trigger_outlook_registration
-from worker import process_manager
+"""测试注册模式解析。
+
+只导入轻量 gateway.registration_helpers（无 FastAPI/DB 副作用），
+避免导入 gateway.main 污染其它 services/tests（如 shared/test_uploaders 的事件循环）。
+模式真正进入 worker config 由 gateway 路由直接调用此 helper 保证；
+config→worker context→OutlookRegistrationFlow 的分派已由 test_step_engine_mode 覆盖。
+"""
+from gateway.registration_helpers import resolve_registration_mode
 
 
-def _run(coro):
-    return asyncio.run(coro)
+def test_toplevel_mode_takes_priority():
+    assert resolve_registration_mode({"mode": "hybrid", "config": {"mode": "protocol"}}) == "hybrid"
 
 
-def test_mode_passed_into_config(monkeypatch):
-    captured = []
-
-    def fake_submit(idx=0, proxy="", config=None):
-        captured.append(config)
-        return f"task-{idx}"
-
-    monkeypatch.setattr(process_manager.task_manager, "submit", fake_submit)
-    monkeypatch.setattr(process_manager, "_fetch_proxy_from_manager", lambda: "fake-proxy")
-
-    _run(trigger_outlook_registration({"count": 2, "proxy": "p", "mode": "hybrid"}))
-    assert len(captured) == 2
-    assert all(c.get("mode") == "hybrid" for c in captured)
+def test_falls_back_to_config_mode():
+    assert resolve_registration_mode({"config": {"mode": "protocol"}}) == "protocol"
 
 
-def test_mode_defaults_to_browser(monkeypatch):
-    captured = []
-
-    def fake_submit(idx=0, proxy="", config=None):
-        captured.append(config)
-        return f"task-{idx}"
-
-    monkeypatch.setattr(process_manager.task_manager, "submit", fake_submit)
-    monkeypatch.setattr(process_manager, "_fetch_proxy_from_manager", lambda: "fake-proxy")
-
-    _run(trigger_outlook_registration({"count": 1, "proxy": "p"}))
-    assert captured[0].get("mode") == "browser"
+def test_defaults_to_browser():
+    assert resolve_registration_mode({"count": 1, "proxy": "p"}) == "browser"
 
 
-def test_mode_from_config_when_no_toplevel(monkeypatch):
-    captured = []
+def test_empty_body_defaults_to_browser():
+    assert resolve_registration_mode({}) == "browser"
 
-    def fake_submit(idx=0, proxy="", config=None):
-        captured.append(config)
-        return f"task-{idx}"
 
-    monkeypatch.setattr(process_manager.task_manager, "submit", fake_submit)
-    monkeypatch.setattr(process_manager, "_fetch_proxy_from_manager", lambda: "fake-proxy")
-
-    _run(trigger_outlook_registration({"count": 1, "proxy": "p", "config": {"mode": "protocol"}}))
-    assert captured[0].get("mode") == "protocol"
+def test_none_config_is_safe():
+    assert resolve_registration_mode({"config": None, "mode": "protocol"}) == "protocol"
