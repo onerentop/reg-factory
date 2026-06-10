@@ -137,65 +137,56 @@ export default function AccountsPage() {
         setTaskStatus(`已提交 ${taskIds.length} 个注册任务（串行队列）`)
         setLogLines(prev => [...prev, `[调度] 已提交 ${taskIds.length} 个任务，依次执行`])
 
-        // 为每个任务连 WebSocket（日志+结果都走 WS）
+        // 同时连接所有任务的 WebSocket（真并发日志）
         const completed = new Set<string>()
         const allResults: Record<string, any> = {}
 
-        const connectTask = (idx: number) => {
-          const tid = taskIds[idx]
-          setLogLines(prev => [...prev, ``, `━━━ 任务 #${idx + 1}/${taskIds.length} ━━━`])
+        const checkAllDone = () => {
+          if (completed.size >= taskIds.length) {
+            setRegistering(false)
+            const okCount = Object.values(allResults).filter((r: any) => r.success).length
+            const emails = Object.values(allResults).filter((r: any) => r.success).map((r: any) => r.email).filter(Boolean)
+            if (okCount > 0) {
+              message.success(`注册完成：成功 ${okCount}/${taskIds.length}`)
+              setTaskStatus(`✅ 成功 ${okCount}/${taskIds.length}: ${emails.join(', ')}`)
+            } else {
+              message.error(`全部失败 (${taskIds.length} 个)`)
+              setTaskStatus(`❌ 全部失败`)
+            }
+            fetchAccounts()
+          }
+        }
+
+        taskIds.forEach((tid, idx) => {
+          const tag = taskIds.length > 1 ? `[#${idx + 1}] ` : ''
           const ws = new WebSocket(`ws://${window.location.hostname}:8000/ws/task/${tid}/logs`)
           ws.onmessage = (e) => {
             try {
               const d = JSON.parse(e.data)
               if (d.type === 'log' && d.message) {
-                setLogLines(prev => [...prev, d.message].slice(-300))
+                setLogLines(prev => [...prev, `${tag}${d.message}`].slice(-500))
               }
               if (d.type === 'result') {
                 completed.add(tid)
                 allResults[tid] = d.data || {}
                 const r = d.data || {}
                 if (r.success) {
-                  setLogLines(prev => [...prev, `🎉 #${idx + 1} 成功: ${r.email || ''}`])
+                  setLogLines(prev => [...prev, `${tag}🎉 成功: ${r.email || ''}`])
                 } else {
-                  setLogLines(prev => [...prev, `💥 #${idx + 1} 失败: ${r.error || ''}`])
+                  setLogLines(prev => [...prev, `${tag}💥 失败: ${r.error || ''}`])
                 }
                 setTaskStatus(`完成 ${completed.size}/${taskIds.length}`)
               }
               if (d.type === 'done') {
                 ws.close()
-                // 连下一个
-                const nextIdx = idx + 1
-                if (nextIdx < taskIds.length) {
-                  connectTask(nextIdx)
-                } else {
-                  // 全部完成
-                  setRegistering(false)
-                  const okCount = Object.values(allResults).filter((r: any) => r.success).length
-                  const emails = Object.values(allResults).filter((r: any) => r.success).map((r: any) => r.email).filter(Boolean)
-                  if (okCount > 0) {
-                    message.success(`注册完成：成功 ${okCount}/${taskIds.length}`)
-                    setTaskStatus(`✅ 成功 ${okCount}/${taskIds.length}: ${emails.join(', ')}`)
-                  } else {
-                    message.error(`全部失败 (${taskIds.length} 个)`)
-                    setTaskStatus(`❌ 全部失败`)
-                  }
-                  fetchAccounts()
-                }
+                checkAllDone()
               }
             } catch {
-              setLogLines(prev => [...prev, e.data])
+              setLogLines(prev => [...prev, `${tag}${e.data}`])
             }
           }
-          ws.onerror = () => {
-            // 连接失败时跳到下一个
-            completed.add(tid)
-            const nextIdx = idx + 1
-            if (nextIdx < taskIds.length) connectTask(nextIdx)
-          }
-        }
-
-        connectTask(0)
+          ws.onerror = () => { completed.add(tid); checkAllDone() }
+        })
       } else {
         setRegistering(false)
         message.error('提交失败')
