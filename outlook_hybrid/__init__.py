@@ -51,7 +51,9 @@ def _build_orchestrator():
                                   mode_used="browser_fallback")
 
     async def _hybrid_retry(proxy, idx):
-        cred = await minter.mint(proxy, idx)
+        # 重试同样受 BrowserPool 信号量约束，避免回退路径突破并发上限
+        async with _POOL.slot():
+            cred = await minter.mint(proxy, idx)
         return submitter.submit(cred)
 
     fallback = FallbackPolicy(browser_fallback=_browser_fallback, hybrid_retry=_hybrid_retry)

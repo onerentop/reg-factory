@@ -58,9 +58,12 @@ class ProtocolSubmitter:
             resp = session.post(CREATE_ACCOUNT_URL, json=cred.create_payload,
                                  headers=headers, proxies=proxies, timeout=30)
         except Exception:
-            # 网络错误：窗口内重发一次
-            resp = session.post(CREATE_ACCOUNT_URL, json=cred.create_payload,
-                                headers=headers, proxies=proxies, timeout=30)
+            # 网络错误：窗口内重发一次；仍失败按 SubmitRejected 处理以触发回退（而非裸异常逃逸）
+            try:
+                resp = session.post(CREATE_ACCOUNT_URL, json=cred.create_payload,
+                                    headers=headers, proxies=proxies, timeout=30)
+            except Exception as e:
+                raise SubmitRejected(f"network error after retry: {e}") from e
 
         body = resp.text or ""
         try:

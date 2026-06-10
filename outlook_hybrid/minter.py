@@ -13,7 +13,7 @@ async def install_create_account_interceptor(page):
     返回一个 asyncio.Future，截获到第一个 CreateAccount 请求时 set_result
     {"payload": dict, "headers": dict}，并对所有 CreateAccount 请求 abort。
     """
-    fut: asyncio.Future = asyncio.get_event_loop().create_future()
+    fut: asyncio.Future = asyncio.get_running_loop().create_future()
 
     async def _intercept(route):
         req = route.request
@@ -50,6 +50,9 @@ class SessionMinter:
                 cap = await asyncio.wait_for(asyncio.shield(fut), timeout=self._timeout)
             except asyncio.TimeoutError:
                 drive.cancel()
+                # 消化已取消任务的异常，避免 "Task exception was never retrieved" 警告
+                drive.add_done_callback(
+                    lambda t: t.cancelled() or t.exception())
                 raise MintFailed("CreateAccount 未在超时内被截获（过不了验证码/表单失败）")
 
             drive.cancel()
