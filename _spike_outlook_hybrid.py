@@ -45,7 +45,7 @@ async def _drive_and_capture(proxy_str):
 
             drive = asyncio.create_task(register_outlook(page, context, 0))
             try:
-                cap = await asyncio.wait_for(asyncio.shield(fut), timeout=180)
+                cap = await asyncio.wait_for(asyncio.shield(fut), timeout=420)
             except asyncio.TimeoutError:
                 drive.cancel()
                 print("[spike] CreateAccount 未被触发/截获，超时")
