@@ -64,9 +64,14 @@ class SessionMinter:
             if not payload.get("HSol"):
                 raise MintFailed("截获的 CreateAccount 无 HSol token")
 
-            cookies = await context.cookies()
-            ua = await page.evaluate("() => navigator.userAgent")
             headers_in = cap["headers"]
+            # UA 从截获的请求头取——abort 后页面可能已跳转，page.evaluate 会因
+            # "Execution context was destroyed" 抛错；CreateAccount 请求头里本就带 UA。
+            ua = headers_in.get("user-agent", "")
+            try:
+                cookies = await context.cookies()
+            except Exception:
+                cookies = []
             return MintedCredential(
                 cookies=cookies,
                 canary=headers_in.get("canary", ""),

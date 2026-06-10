@@ -58,8 +58,12 @@ async def _drive_and_capture(proxy_str):
 
             captured["payload"] = cap["payload"]
             captured["headers"] = cap["headers"]
-            captured["cookies"] = await context.cookies()
-            captured["ua"] = await page.evaluate("() => navigator.userAgent")
+            # UA 从截获的请求头取（页面可能已跳转，page.evaluate 会 context destroyed）
+            captured["ua"] = cap["headers"].get("user-agent", "")
+            try:
+                captured["cookies"] = await context.cookies()
+            except Exception:
+                captured["cookies"] = []
     finally:
         try:
             bb.close_browser(profile_id); bb.delete_browser(profile_id)
