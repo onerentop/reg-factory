@@ -18,11 +18,18 @@ _POOL = BrowserPool(int(os.environ.get("HYBRID_BROWSER_CONCURRENCY", "2")))
 
 
 def _extract_token(email, password, proxy):
-    """从已建号会话抽 refresh_token。
+    """建号后用纯 HTTP OAuth 抽 refresh_token（无浏览器，复用 extract_graph_tokens）。
 
-    注：混合模式建号后，token 由独立的 /tools/extract-graph-token 流程补齐，
-    这里返回空字符串不阻断成功（has_token=false）。后续可接入 HTTP 抽取。
+    失败返回空串，不阻断注册成功（has_token=false）。token 抽取走系统代理(trust_env)，
+    不依赖注册用的 proxy，故 proxy 参数此处不使用（保留以统一接口）。
     """
+    try:
+        from extract_graph_tokens import get_graph_token
+        result = get_graph_token(email, password)
+        if result and isinstance(result, dict):
+            return result.get("refresh_token", "") or ""
+    except Exception:
+        pass
     return ""
 
 

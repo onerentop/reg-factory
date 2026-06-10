@@ -7,6 +7,17 @@ def test_facade_exported():
     assert hasattr(outlook_hybrid, "register_outlook_hybrid")
 
 
+def test_extract_token_returns_refresh_token(monkeypatch):
+    monkeypatch.setattr("extract_graph_tokens.get_graph_token",
+                        lambda email, password, *a, **k: {"refresh_token": "RT123"})
+    assert outlook_hybrid._extract_token("e@x.com", "pw", "") == "RT123"
+
+
+def test_extract_token_safe_on_failure(monkeypatch):
+    monkeypatch.setattr("extract_graph_tokens.get_graph_token", lambda *a, **k: None)
+    assert outlook_hybrid._extract_token("e@x.com", "pw", "") == ""
+
+
 def test_facade_is_async_with_expected_signature():
     fn = outlook_hybrid.register_outlook_hybrid
     assert inspect.iscoroutinefunction(fn)
