@@ -1,12 +1,16 @@
-"""测试 OutlookRegistrationFlow.execute_step 的 hybrid/browser/protocol 模式分派。"""
+"""测试 OutlookRegistrationFlow.execute_step 的 hybrid/browser/protocol 模式分派。
+
+所有 mock 均通过 monkeypatch.setitem 注入**全新** ModuleType（不触碰/不变异真实模块），
+teardown 时由 monkeypatch 完整还原，避免污染后续测试（如 tests/test_browser_provider.py）。
+"""
 import asyncio
 import sys
 import types
-import pytest
 from worker.step_engine import OutlookRegistrationFlow
 
 
 def _make_flow():
+    # 绕过 __init__（其会调用 LegacyBridge）
     return OutlookRegistrationFlow.__new__(OutlookRegistrationFlow)
 
 
@@ -14,15 +18,11 @@ def _run(coro):
     return asyncio.run(coro)
 
 
-def _inject_common_browser_provider(monkeypatch):
-    """注入 common.browser_provider stub，避免 'No module named common' 错误。"""
-    common_pkg = sys.modules.get("common") or types.ModuleType("common")
-    common_pkg.__path__ = []
-    monkeypatch.setitem(sys.modules, "common", common_pkg)
-
-    bp = sys.modules.get("common.browser_provider") or types.ModuleType("common.browser_provider")
-    bp.get_browser_provider = lambda: object()
-    monkeypatch.setitem(sys.modules, "common.browser_provider", bp)
+def _fake_module(name, **attrs):
+    mod = types.ModuleType(name)
+    for k, v in attrs.items():
+        setattr(mod, k, v)
+    return mod
 
 
 def test_mode_hybrid_dispatches_to_register_outlook_hybrid(monkeypatch):
@@ -32,11 +32,8 @@ def test_mode_hybrid_dispatches_to_register_outlook_hybrid(monkeypatch):
         called["mode"] = "hybrid"
         return ("h@outlook.com", "Pw!", "rt")
 
-    mod = types.ModuleType("outlook_hybrid")
-    mod.register_outlook_hybrid = fake_hybrid
-    monkeypatch.setitem(sys.modules, "outlook_hybrid", mod)
-
-    _inject_common_browser_provider(monkeypatch)
+    monkeypatch.setitem(sys.modules, "outlook_hybrid",
+                        _fake_module("outlook_hybrid", register_outlook_hybrid=fake_hybrid))
 
     flow = _make_flow()
     ctx = {"mode": "hybrid", "proxy": "p", "idx": 0}
@@ -54,11 +51,8 @@ def test_mode_protocol_dispatches_to_register_outlook_protocol(monkeypatch):
         called["mode"] = "protocol"
         return ("p@outlook.com", "Pw!")
 
-    mod = sys.modules.get("register_outlook_standalone") or types.ModuleType("register_outlook_standalone")
-    monkeypatch.setattr(mod, "register_outlook_protocol", fake_protocol, raising=False)
-    monkeypatch.setitem(sys.modules, "register_outlook_standalone", mod)
-
-    _inject_common_browser_provider(monkeypatch)
+    monkeypatch.setitem(sys.modules, "register_outlook_standalone",
+                        _fake_module("register_outlook_standalone", register_outlook_protocol=fake_protocol))
 
     flow = _make_flow()
     ctx = {"mode": "protocol", "proxy": "p", "idx": 0}
@@ -75,18 +69,16 @@ def test_default_mode_is_browser(monkeypatch):
         called["mode"] = "browser"
         return ("b@outlook.com", "Pw!", None)
 
-    mod = sys.modules.get("register_outlook_standalone") or types.ModuleType("register_outlook_standalone")
-    monkeypatch.setattr(mod, "_register_one_browser", fake_browser, raising=False)
-    monkeypatch.setitem(sys.modules, "register_outlook_standalone", mod)
+    monkeypatch.setitem(sys.modules, "register_outlook_standalone",
+                        _fake_module("register_outlook_standalone", _register_one_browser=fake_browser))
 
-    # 确保 common 父包存在，以便 "from common.browser_provider import ..." 能被解析
-    common_pkg = sys.modules.get("common") or types.ModuleType("common")
+    # browser 分支会 from common.browser_provider import get_browser_provider —
+    # 注入全新的 common 父包 + 子模块 stub，绝不变异真实模块。
+    common_pkg = _fake_module("common")
     common_pkg.__path__ = []  # 标记为包
     monkeypatch.setitem(sys.modules, "common", common_pkg)
-
-    bp = types.ModuleType("common.browser_provider")
-    bp.get_browser_provider = lambda: object()
-    monkeypatch.setitem(sys.modules, "common.browser_provider", bp)
+    monkeypatch.setitem(sys.modules, "common.browser_provider",
+                        _fake_module("common.browser_provider", get_browser_provider=lambda: object()))
 
     flow = _make_flow()
     ctx = {"proxy": "p", "idx": 0}  # 无 mode → 默认 browser

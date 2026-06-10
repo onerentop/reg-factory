@@ -87,8 +87,6 @@ class OutlookRegistrationFlow(RegistrationFlow):
             )
 
         elif step_name == "Browser registration with proxy":
-            from common.browser_provider import get_browser_provider
-
             proxy_str = context.get("proxy", "")
             idx = context.get("idx", 0)
             mode = context.get("mode", "browser")
@@ -109,6 +107,7 @@ class OutlookRegistrationFlow(RegistrationFlow):
                     email, password = result[0], result[1]
 
             else:  # browser（默认，已稳定）
+                from common.browser_provider import get_browser_provider
                 from register_outlook_standalone import _register_one_browser
                 bb = get_browser_provider()
                 result = await _register_one_browser(bb, idx, proxy_str)
