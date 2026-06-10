@@ -186,22 +186,15 @@ def solve_arkose_capsolver(public_key=MS_SIGNUP_ARKOSE_KEY, page_url="https://si
         return None
 
 
-def solve_funcaptcha_ezcaptcha(public_key=MS_SIGNUP_ARKOSE_KEY, page_url="https://signup.live.com/", max_wait=120,
-                               proxy_host="proxy.proxyshare.com", proxy_port=5959,
-                               proxy_user="ps-s46az41wfrmk_area-US", proxy_pass="hhChjubcVIpCfLo0"):
-    """Use EZ-Captcha to solve FunCaptcha (with proxy for better success rate)."""
+def solve_funcaptcha_ezcaptcha(public_key=MS_SIGNUP_ARKOSE_KEY, page_url="https://signup.live.com/", max_wait=120):
+    """Use EZ-Captcha to solve FunCaptcha (ProxyLess mode)."""
     if not EZCAPTCHA_API_KEY:
         return None
     try:
         task = {
-            "type": "FunCaptchaTask",
+            "type": "FunCaptchaTaskProxyLess",
             "websiteURL": page_url,
-            "websitePublicKey": public_key,
-            "proxyType": "http",
-            "proxyAddress": proxy_host,
-            "proxyPort": proxy_port,
-            "proxyLogin": proxy_user,
-            "proxyPassword": proxy_pass,
+            "websiteKey": public_key,
         }
         resp = requests.post(f"{EZCAPTCHA_API_BASE}/createTask", json={
             "clientKey": EZCAPTCHA_API_KEY,
@@ -224,8 +217,11 @@ def solve_funcaptcha_ezcaptcha(public_key=MS_SIGNUP_ARKOSE_KEY, page_url="https:
                 token = result.get("solution", {}).get("token")
                 print(f"  [ezcaptcha] solved! {token[:60]}...")
                 return token
-            elif result.get("status") == "failed":
+            elif result.get("status") in ("failed", "error") or result.get("errorId"):
+                print(f"  [ezcaptcha] failed: {result.get('errorDescription', result.get('errorCode', ''))}")
                 return None
+            print(f"  [ezcaptcha] waiting... ({int(time.time()-start)}s)")
+        print("  [ezcaptcha] timeout")
         return None
     except Exception as e:
         print(f"  [ezcaptcha] error: {e}")
@@ -238,8 +234,7 @@ def solve_funcaptcha_captchakings(public_key=MS_SIGNUP_ARKOSE_KEY, page_url="htt
         return None
     try:
         print(f"  [captchakings] solving FunCaptcha...")
-        ck_proxies = {"https": "http://127.0.0.1:7897", "http": "http://127.0.0.1:7897"}
-        resp = requests.post("https://api.captchakings.com/createTask", proxies=ck_proxies, json={
+        resp = requests.post("https://captchakings.com/api/process.php", json={
             "clientKey": CAPTCHAKINGS_API_KEY,
             "task": {
                 "type": "FunCaptchaTaskProxyLess",
@@ -260,7 +255,7 @@ def solve_funcaptcha_captchakings(public_key=MS_SIGNUP_ARKOSE_KEY, page_url="htt
         start = time.time()
         while time.time() - start < max_wait:
             time.sleep(5)
-            resp = requests.post("https://api.captchakings.com/getTaskResult", proxies=ck_proxies, json={
+            resp = requests.post("https://captchakings.com/api/process.php", json={
                 "clientKey": CAPTCHAKINGS_API_KEY, "taskId": task_id,
             }, timeout=30)
             result = resp.json()
@@ -1553,11 +1548,10 @@ def register_outlook_protocol(proxy_str=None, idx=0):
             except Exception:
                 pass
 
-        # Solve FunCaptcha — CaptchaKings is the only working solver for Outlook FunCaptcha
-        # CapSolver stopped FunCaptcha support, EZCaptcha also unsupported
+        # Solve FunCaptcha — EZ-Captcha supports FunCaptcha, CapSolver does NOT
         fc_token = None
         for solver_name, solver_fn in [
-            ("captchakings", lambda: solve_funcaptcha_captchakings(MS_SIGNUP_ARKOSE_KEY, "https://signup.live.com/signup?lic=1")),
+            ("ezcaptcha", lambda: solve_funcaptcha_ezcaptcha(MS_SIGNUP_ARKOSE_KEY, "https://signup.live.com/")),
         ]:
             print(f"  {tag} trying {solver_name}...")
             fc_token = solver_fn()
