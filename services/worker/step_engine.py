@@ -88,32 +88,47 @@ class OutlookRegistrationFlow(RegistrationFlow):
 
         elif step_name == "Browser registration with proxy":
             from common.browser_provider import get_browser_provider
-            from register_outlook_standalone import _register_one_browser
 
             proxy_str = context.get("proxy", "")
             idx = context.get("idx", 0)
-            bb = get_browser_provider()
+            mode = context.get("mode", "browser")
 
-            result = await _register_one_browser(bb, idx, proxy_str)
+            email = password = graph_token = None
 
-            if result and len(result) >= 2 and result[0]:
-                email, password = result[0], result[1]
-                graph_token = result[2] if len(result) > 2 else None
+            if mode == "hybrid":
+                from outlook_hybrid import register_outlook_hybrid
+                result = await register_outlook_hybrid(proxy_str, idx)
+                if result and result[0]:
+                    email, password = result[0], result[1]
+                    graph_token = result[2] if len(result) > 2 else None
+
+            elif mode == "protocol":
+                from register_outlook_standalone import register_outlook_protocol
+                result = register_outlook_protocol(proxy_str, idx)
+                if result and result[0]:
+                    email, password = result[0], result[1]
+
+            else:  # browser（默认，已稳定）
+                from register_outlook_standalone import _register_one_browser
+                bb = get_browser_provider()
+                result = await _register_one_browser(bb, idx, proxy_str)
+                if result and len(result) >= 2 and result[0]:
+                    email, password = result[0], result[1]
+                    graph_token = result[2] if len(result) > 2 else None
+
+            if email:
                 context["email"] = email
                 context["password"] = password
                 if graph_token:
                     context["refresh_token"] = graph_token
                 return StepResult(
                     step_number=step_number, name=step_name, success=True,
-                    data={
-                        "email": email,
-                        "has_token": bool(graph_token),
-                    },
+                    data={"email": email, "has_token": bool(graph_token), "mode": mode},
                 )
 
             return StepResult(
                 step_number=step_number, name=step_name, success=False,
-                error="Registration failed — check ixBrowser and proxy",
+                error=f"Registration failed (mode={mode}) — check ixBrowser/proxy/captcha",
             )
 
         return StepResult(
