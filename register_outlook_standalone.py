@@ -1865,13 +1865,16 @@ async def _open_ixbrowser_page(bb, idx, proxy_str):
             except Exception as e:
                 err_msg = str(e)
                 if '最大创建窗口数' in err_msg or '超过' in err_msg:
+                    print(f"  {tag} browser quota full, cleaning up...")
                     bb.cleanup_browsers(keep=2)
                     await asyncio.sleep(3)
                     continue
                 elif 'TLS' in err_msg or 'socket' in err_msg or 'ECONNRESET' in err_msg:
+                    print(f"  {tag} ixBrowser TLS error (retry {_retry + 1}/5)")
                     await asyncio.sleep(5 + _retry * 3)
                     continue
                 elif _retry < 4:
+                    print(f"  {tag} create browser error (retry {_retry + 1}): {err_msg[:80]}")
                     await asyncio.sleep(3)
                     continue
                 else:
@@ -1888,6 +1891,7 @@ async def _open_ixbrowser_page(bb, idx, proxy_str):
             browser = await p.chromium.connect_over_cdp(ws)
             context = browser.contexts[0] if browser.contexts else await browser.new_context()
             page = await context.new_page()
+            # 禁用 passkey 弹窗：覆盖 navigator.credentials，网站 fallback 到密码登录
             await context.add_init_script("""
                 Object.defineProperty(navigator, 'credentials', {
                     get: () => ({ create: () => Promise.reject('disabled'), get: () => Promise.reject('disabled'), store: () => Promise.reject('disabled') })
@@ -1911,6 +1915,9 @@ async def _register_one_browser(bb, idx, proxy_str):
     try:
         async with _open_ixbrowser_page(bb, idx, proxy_str) as (page, context, _pid):
             print(f"  {tag} ixBrowser connected")
+            # NOTE: resource blocking intentionally disabled in browser mode.
+            # PerimeterX behavioral analysis can detect modified network patterns.
+            # Bandwidth saving via resource blocking only applies in headless mode.
             result = await register_outlook(page, context, idx)
             email = result[0] if result else None
             password = result[1] if result and len(result) > 1 else None
