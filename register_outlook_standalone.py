@@ -238,7 +238,8 @@ def solve_funcaptcha_captchakings(public_key=MS_SIGNUP_ARKOSE_KEY, page_url="htt
         return None
     try:
         print(f"  [captchakings] solving FunCaptcha...")
-        resp = requests.post("https://api.captchakings.com/createTask", json={
+        ck_proxies = {"https": "http://127.0.0.1:7897", "http": "http://127.0.0.1:7897"}
+        resp = requests.post("https://api.captchakings.com/createTask", proxies=ck_proxies, json={
             "clientKey": CAPTCHAKINGS_API_KEY,
             "task": {
                 "type": "FunCaptchaTaskProxyLess",
@@ -259,7 +260,7 @@ def solve_funcaptcha_captchakings(public_key=MS_SIGNUP_ARKOSE_KEY, page_url="htt
         start = time.time()
         while time.time() - start < max_wait:
             time.sleep(5)
-            resp = requests.post("https://api.captchakings.com/getTaskResult", json={
+            resp = requests.post("https://api.captchakings.com/getTaskResult", proxies=ck_proxies, json={
                 "clientKey": CAPTCHAKINGS_API_KEY, "taskId": task_id,
             }, timeout=30)
             result = resp.json()
