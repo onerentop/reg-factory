@@ -60,9 +60,11 @@ export default function AccountsPage() {
   const [selectedProxy, setSelectedProxy] = useState<string>('')
   const [proxyList, setProxyList] = useState<any[]>([])
   const [registering, setRegistering] = useState(false)
-  const [_taskId, setTaskId] = useState<string | null>(null)
   const [taskStatus, setTaskStatus] = useState<string>('')
-  const [logLines, setLogLines] = useState<string[]>([])
+  const [taskLogs, setTaskLogs] = useState<Record<string, string[]>>({})
+  const [taskStates, setTaskStates] = useState<Record<string, string>>({})
+  const [activeTab, setActiveTab] = useState<string>('')
+  const [taskOrder, setTaskOrder] = useState<string[]>([])
   const logRef = useRef<HTMLDivElement>(null)
 
   const fetchAccounts = useCallback(() => {
@@ -89,7 +91,7 @@ export default function AccountsPage() {
 
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight
-  }, [logLines])
+  }, [taskLogs, activeTab])
 
   const successCount = accounts.filter(a => a.status === 'success').length
   const failedCount = accounts.filter(a => a.status === 'failed').length
@@ -123,7 +125,10 @@ export default function AccountsPage() {
   const handleStartRegister = async () => {
     setRegistering(true)
     setTaskStatus('正在提交...')
-    setLogLines([])
+    setTaskLogs({})
+    setTaskStates({})
+    setTaskOrder([])
+    setActiveTab('')
     try {
       const resp = await fetch('/api/register/outlook', {
         method: 'POST',
@@ -133,11 +138,19 @@ export default function AccountsPage() {
       const data = await resp.json()
       const taskIds: string[] = data.data?.task_ids || []
       if (taskIds.length > 0) {
-        setTaskId(taskIds[0])
-        setTaskStatus(`已提交 ${taskIds.length} 个注册任务（串行队列）`)
-        setLogLines(prev => [...prev, `[调度] 已提交 ${taskIds.length} 个任务，依次执行`])
+        setTaskOrder(taskIds)
+        setActiveTab(taskIds[0])
+        setTaskStatus(`${taskIds.length} 个任务并发中...`)
 
-        // 同时连接所有任务的 WebSocket（真并发日志）
+        const initLogs: Record<string, string[]> = {}
+        const initStates: Record<string, string> = {}
+        taskIds.forEach((tid, i) => {
+          initLogs[tid] = [`任务 #${i + 1} 开始...`]
+          initStates[tid] = 'running'
+        })
+        setTaskLogs(initLogs)
+        setTaskStates(initStates)
+
         const completed = new Set<string>()
         const allResults: Record<string, any> = {}
 
@@ -157,24 +170,24 @@ export default function AccountsPage() {
           }
         }
 
-        taskIds.forEach((tid, idx) => {
-          const tag = taskIds.length > 1 ? `[#${idx + 1}] ` : ''
+        taskIds.forEach((tid) => {
           const ws = new WebSocket(`ws://${window.location.hostname}:8000/ws/task/${tid}/logs`)
           ws.onmessage = (e) => {
             try {
               const d = JSON.parse(e.data)
               if (d.type === 'log' && d.message) {
-                setLogLines(prev => [...prev, `${tag}${d.message}`].slice(-500))
+                setTaskLogs(prev => ({ ...prev, [tid]: [...(prev[tid] || []), d.message].slice(-300) }))
               }
               if (d.type === 'result') {
                 completed.add(tid)
                 allResults[tid] = d.data || {}
                 const r = d.data || {}
-                if (r.success) {
-                  setLogLines(prev => [...prev, `${tag}🎉 成功: ${r.email || ''}`])
-                } else {
-                  setLogLines(prev => [...prev, `${tag}💥 失败: ${r.error || ''}`])
-                }
+                const statusStr = r.success ? 'success' : 'failed'
+                setTaskStates(prev => ({ ...prev, [tid]: statusStr }))
+                setTaskLogs(prev => ({
+                  ...prev,
+                  [tid]: [...(prev[tid] || []), r.success ? `🎉 成功: ${r.email || ''}` : `💥 失败: ${r.error || ''}`],
+                }))
                 setTaskStatus(`完成 ${completed.size}/${taskIds.length}`)
               }
               if (d.type === 'done') {
@@ -182,10 +195,10 @@ export default function AccountsPage() {
                 checkAllDone()
               }
             } catch {
-              setLogLines(prev => [...prev, `${tag}${e.data}`])
+              setTaskLogs(prev => ({ ...prev, [tid]: [...(prev[tid] || []), e.data] }))
             }
           }
-          ws.onerror = () => { completed.add(tid); checkAllDone() }
+          ws.onerror = () => { completed.add(tid); setTaskStates(prev => ({ ...prev, [tid]: 'failed' })); checkAllDone() }
         })
       } else {
         setRegistering(false)
@@ -405,13 +418,13 @@ export default function AccountsPage() {
       <Modal
         title={<span style={{ fontWeight: 700 }}>新建 {platformTitle} 注册</span>}
         open={registerVisible}
-        onCancel={() => { if (!registering) { setRegisterVisible(false); setLogLines([]) } }}
+        onCancel={() => { if (!registering) { setRegisterVisible(false); setTaskOrder([]); setTaskLogs({}); setTaskStates({}) } }}
         footer={registering ? null : undefined}
         closable={!registering}
         maskClosable={!registering}
         width={720}
       >
-        {!registering && logLines.length === 0 ? (
+        {!registering && taskOrder.length === 0 ? (
           <div style={{ padding: '8px 0' }}>
             <div style={{ marginBottom: 20 }}>
               <label style={{ display: 'block', marginBottom: 6, fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>注册数量</label>
@@ -449,6 +462,35 @@ export default function AccountsPage() {
                 {taskStatus}
               </span>
             </div>
+            {/* Tab 标签栏 */}
+            <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
+              {taskOrder.map((tid, idx) => {
+                const st = taskStates[tid] || 'running'
+                const isActive = activeTab === tid
+                const stIcon = st === 'success' ? '✅' : st === 'failed' ? '❌' : '⏳'
+                return (
+                  <div
+                    key={tid}
+                    onClick={() => setActiveTab(tid)}
+                    style={{
+                      padding: '5px 14px',
+                      borderRadius: '8px 8px 0 0',
+                      cursor: 'pointer',
+                      fontSize: 12,
+                      fontWeight: isActive ? 600 : 400,
+                      background: isActive ? '#1c1917' : 'var(--bg-elevated)',
+                      color: isActive ? '#f5f5f4' : 'var(--text-secondary)',
+                      border: isActive ? '1px solid #292524' : '1px solid var(--border)',
+                      borderBottom: isActive ? '1px solid #1c1917' : '1px solid var(--border)',
+                      transition: 'all 0.15s',
+                    }}
+                  >
+                    {stIcon} 任务 #{idx + 1}
+                  </div>
+                )
+              })}
+            </div>
+            {/* 日志面板 */}
             <div
               ref={logRef}
               style={{
@@ -458,17 +500,17 @@ export default function AccountsPage() {
                 fontSize: 12,
                 lineHeight: 1.7,
                 padding: 14,
-                borderRadius: 10,
-                height: 380,
+                borderRadius: '0 10px 10px 10px',
+                height: 360,
                 overflowY: 'auto',
                 whiteSpace: 'pre-wrap',
                 wordBreak: 'break-all',
                 border: '1px solid #292524',
               }}
             >
-              {logLines.length === 0 ? (
+              {(taskLogs[activeTab] || []).length === 0 ? (
                 <span style={{ color: '#78716c' }}>等待日志...</span>
-              ) : logLines.map((line, i) => (
+              ) : (taskLogs[activeTab] || []).map((line, i) => (
                 <div key={i} style={{
                   color: line.includes('OK') || line.includes('成功') || line.includes('🎉') ? '#4ade80' :
                          line.includes('error') || line.includes('失败') || line.includes('💥') || line.includes('Error') ? '#f87171' :
@@ -478,7 +520,7 @@ export default function AccountsPage() {
             </div>
             {!registering && (
               <div style={{ marginTop: 14, textAlign: 'right' }}>
-                <Button onClick={() => { setRegisterVisible(false); setLogLines([]) }}>关闭</Button>
+                <Button onClick={() => { setRegisterVisible(false); setTaskOrder([]); setTaskLogs({}); setTaskStates({}) }}>关闭</Button>
               </div>
             )}
           </div>
