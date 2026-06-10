@@ -10,23 +10,31 @@ from .errors import MintFailed
 async def install_create_account_interceptor(page):
     """在 page 上挂 CreateAccount 路由拦截器（await 确保注册完成，避免与导航竞态）。
 
-    返回一个 asyncio.Future，截获到第一个 CreateAccount 请求时 set_result
-    {"payload": dict, "headers": dict}，并对所有 CreateAccount 请求 abort。
+    Outlook 会发两次 CreateAccount：第一次**无 HSol**（触发验证码挑战），过码后第二次
+    **带 HSol**。只截获并 abort 带 HSol 的那次；无 HSol 的放行(continue)，让验证码流程正常走。
+    返回一个 asyncio.Future，截获到带 HSol 的请求时 set_result {"payload", "headers"}。
     """
     fut: asyncio.Future = asyncio.get_running_loop().create_future()
 
     async def _intercept(route):
         req = route.request
-        if not fut.done():
-            try:
-                payload = json.loads(req.post_data or "{}")
-            except Exception:
-                payload = {}
-            fut.set_result({"payload": payload, "headers": dict(req.headers)})
         try:
-            await route.abort()
+            payload = json.loads(req.post_data or "{}")
         except Exception:
-            pass
+            payload = {}
+        if payload.get("HSol"):
+            if not fut.done():
+                fut.set_result({"payload": payload, "headers": dict(req.headers)})
+            try:
+                await route.abort()
+            except Exception:
+                pass
+        else:
+            # 无 HSol 的首次提交：放行，让服务端返回验证码挑战、页面正常走过码流程
+            try:
+                await route.continue_()
+            except Exception:
+                pass
 
     await page.route("**/API/CreateAccount*", _intercept)
     return fut

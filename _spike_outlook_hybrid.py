@@ -33,13 +33,17 @@ async def _drive_and_capture(proxy_str):
 
             async def _intercept(route):
                 req = route.request
-                if not fut.done():
-                    try:
-                        body = json.loads(req.post_data or "{}")
-                    except Exception:
-                        body = {}
-                    fut.set_result({"payload": body, "headers": dict(req.headers)})
-                await route.abort()
+                try:
+                    body = json.loads(req.post_data or "{}")
+                except Exception:
+                    body = {}
+                if body.get("HSol"):
+                    if not fut.done():
+                        fut.set_result({"payload": body, "headers": dict(req.headers)})
+                    await route.abort()
+                else:
+                    # 无 HSol 的首次提交放行，让验证码挑战正常出现
+                    await route.continue_()
 
             await page.route("**/API/CreateAccount*", _intercept)
 
