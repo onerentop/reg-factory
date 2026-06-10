@@ -58,6 +58,7 @@ export default function AccountsPage() {
   const [registerVisible, setRegisterVisible] = useState(false)
   const [registerCount, setRegisterCount] = useState(1)
   const [selectedProxy, setSelectedProxy] = useState<string>('')
+  const [registerMode, setRegisterMode] = useState<string>('browser')
   const [proxyList, setProxyList] = useState<any[]>([])
   const [registering, setRegistering] = useState(false)
   const [taskStatus, setTaskStatus] = useState<string>('')
@@ -133,7 +134,7 @@ export default function AccountsPage() {
       const resp = await fetch('/api/register/outlook', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ count: registerCount, proxy: selectedProxy }),
+        body: JSON.stringify({ count: registerCount, proxy: selectedProxy, mode: registerMode }),
       })
       const data = await resp.json()
       const taskIds: string[] = data.data?.task_ids || []
@@ -449,6 +450,19 @@ export default function AccountsPage() {
                   没有已激活的代理，请先到代理配置页面添加
                 </div>
               )}
+            </div>
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ display: 'block', marginBottom: 6, fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>注册模式</label>
+              <Select
+                style={{ width: '100%' }}
+                value={registerMode}
+                onChange={setRegisterMode}
+                options={[
+                  { value: 'browser', label: '浏览器模式（稳定）' },
+                  { value: 'hybrid', label: '混合模式（浏览器解码+协议提交）' },
+                  { value: 'protocol', label: '纯协议（实验）' },
+                ]}
+              />
             </div>
             <Button type="primary" block size="large" onClick={handleStartRegister} style={{ height: 44, fontSize: 15 }}>
               开始注册
