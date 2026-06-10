@@ -19,11 +19,18 @@ import re
 import string
 import sys
 import time
+from contextlib import asynccontextmanager
 from datetime import datetime
 
 if sys.platform == "win32":
-    sys.stdout.reconfigure(encoding="utf-8")
-    sys.stdin.reconfigure(encoding="utf-8")
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+    try:
+        sys.stdin.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
 
 import requests
 from playwright.async_api import async_playwright
@@ -1839,17 +1846,18 @@ async def _register_one_headless(idx, proxy_str):
 
 # ======================== Browser Mode (ixBrowser, full GUI) ========================
 
-async def _register_one_browser(bb, idx, proxy_str):
+
+@asynccontextmanager
+async def _open_ixbrowser_page(bb, idx, proxy_str):
+    """创建并连接一个 ixBrowser 页面，yield (page, context, profile_id)，退出时清理。
+
+    封装 _register_one_browser 的浏览器启动样板，供混合注册复用。
     """
-    Register via ixBrowser full browser (highest traffic, most reliable).
-    Returns (email, password) or (None, None).
-    """
-    tag = f"[#{idx}][browser]"
+    tag = f"[#{idx}]"
     profile_id = None
     try:
         ts = datetime.now().strftime("%m%d_%H%M%S")
         name = f"outlook_{ts}_{idx}"
-
         for _retry in range(5):
             try:
                 profile_id = bb.create_browser(name=name, proxy_str=proxy_str)
@@ -1857,64 +1865,60 @@ async def _register_one_browser(bb, idx, proxy_str):
             except Exception as e:
                 err_msg = str(e)
                 if '最大创建窗口数' in err_msg or '超过' in err_msg:
-                    print(f"  {tag} browser quota full, cleaning up...")
                     bb.cleanup_browsers(keep=2)
                     await asyncio.sleep(3)
                     continue
                 elif 'TLS' in err_msg or 'socket' in err_msg or 'ECONNRESET' in err_msg:
-                    print(f"  {tag} ixBrowser TLS error (retry {_retry + 1}/5)")
                     await asyncio.sleep(5 + _retry * 3)
                     continue
                 elif _retry < 4:
-                    print(f"  {tag} create browser error (retry {_retry + 1}): {err_msg[:80]}")
                     await asyncio.sleep(3)
                     continue
                 else:
                     raise
-
         if not profile_id:
-            print(f"  {tag} create browser failed")
-            return None, None
+            raise RuntimeError(f"{tag} create browser failed")
 
         info = bb.open_browser(profile_id)
         ws = info.get("ws", "")
         if not ws:
-            print(f"  {tag} no WebSocket URL")
-            return None, None
+            raise RuntimeError(f"{tag} no WebSocket URL")
 
-        print(f"  {tag} ixBrowser connected")
         async with async_playwright() as p:
             browser = await p.chromium.connect_over_cdp(ws)
             context = browser.contexts[0] if browser.contexts else await browser.new_context()
             page = await context.new_page()
-            # 禁用 passkey 弹窗：覆盖 navigator.credentials，网站 fallback 到密码登录
             await context.add_init_script("""
                 Object.defineProperty(navigator, 'credentials', {
                     get: () => ({ create: () => Promise.reject('disabled'), get: () => Promise.reject('disabled'), store: () => Promise.reject('disabled') })
                 });
             """)
-            # NOTE: resource blocking intentionally disabled in browser mode.
-            # PerimeterX behavioral analysis can detect modified network patterns.
-            # Bandwidth saving via resource blocking only applies in headless mode.
-            result = await register_outlook(page, context, idx)
-            email = result[0] if result else None
-            password = result[1] if result and len(result) > 1 else None
-            graph = result[2] if result and len(result) > 2 else None
-
-        return email, password, graph
-
-    except Exception as e:
-        print(f"  {tag} error: {e}")
-        return None, None
+            yield page, context, profile_id
     finally:
         if profile_id:
             try:
                 bb.close_browser(profile_id)
                 await asyncio.sleep(2)
                 bb.delete_browser(profile_id)
-                print(f"  {tag} browser cleaned up")
             except Exception:
                 pass
+
+
+async def _register_one_browser(bb, idx, proxy_str):
+    """Register via ixBrowser full browser (highest traffic, most reliable).
+    Returns (email, password[, graph]) or (None, None)."""
+    tag = f"[#{idx}][browser]"
+    try:
+        async with _open_ixbrowser_page(bb, idx, proxy_str) as (page, context, _pid):
+            print(f"  {tag} ixBrowser connected")
+            result = await register_outlook(page, context, idx)
+            email = result[0] if result else None
+            password = result[1] if result and len(result) > 1 else None
+            graph = result[2] if result and len(result) > 2 else None
+            return email, password, graph
+    except Exception as e:
+        print(f"  {tag} error: {e}")
+        return None, None
 
 
 # ======================== Main ========================
