@@ -233,22 +233,47 @@ def solve_funcaptcha_ezcaptcha(public_key=MS_SIGNUP_ARKOSE_KEY, page_url="https:
 
 
 def solve_funcaptcha_captchakings(public_key=MS_SIGNUP_ARKOSE_KEY, page_url="https://signup.live.com/signup?lic=1", max_wait=120):
-    """Use CaptchaKings to solve Arkose Labs (FunCaptcha) — 98% success for MS Outlook."""
+    """Use CaptchaKings HTTP API to solve Arkose Labs (FunCaptcha)."""
     if not CAPTCHAKINGS_API_KEY:
         return None
     try:
-        from captchakings import CaptchaKings
-        solver = CaptchaKings(api_key=CAPTCHAKINGS_API_KEY)
         print(f"  [captchakings] solving FunCaptcha...")
-        token = solver.funcaptcha(
-            public_key=public_key,
-            url=page_url,
-            service_url="https://client-api.arkoselabs.com",
-        )
-        if token:
-            print(f"  [captchakings] solved! {str(token)[:60]}...")
-            return str(token)
-        print("  [captchakings] no token returned")
+        resp = requests.post("https://api.captchakings.com/createTask", json={
+            "clientKey": CAPTCHAKINGS_API_KEY,
+            "task": {
+                "type": "FunCaptchaTaskProxyLess",
+                "websiteURL": page_url,
+                "websitePublicKey": public_key,
+                "funcaptchaApiJSSubdomain": "https://client-api.arkoselabs.com",
+            }
+        }, timeout=30)
+        data = resp.json()
+        if data.get("errorId", 1) != 0:
+            print(f"  [captchakings] create error: {data.get('errorDescription', data)}")
+            return None
+        task_id = data.get("taskId")
+        if not task_id:
+            print(f"  [captchakings] no taskId: {data}")
+            return None
+        print(f"  [captchakings] task: {task_id}")
+        start = time.time()
+        while time.time() - start < max_wait:
+            time.sleep(5)
+            resp = requests.post("https://api.captchakings.com/getTaskResult", json={
+                "clientKey": CAPTCHAKINGS_API_KEY, "taskId": task_id,
+            }, timeout=30)
+            result = resp.json()
+            if result.get("status") == "ready":
+                token = result.get("solution", {}).get("token")
+                if token:
+                    print(f"  [captchakings] solved! {token[:60]}...")
+                    return token
+                print(f"  [captchakings] ready but no token: {result}")
+                return None
+            elif result.get("status") == "failed" or result.get("errorId"):
+                print(f"  [captchakings] failed: {result.get('errorDescription', result)}")
+                return None
+        print("  [captchakings] timeout")
         return None
     except Exception as e:
         print(f"  [captchakings] error: {e}")
@@ -1527,12 +1552,11 @@ def register_outlook_protocol(proxy_str=None, idx=0):
             except Exception:
                 pass
 
-        # Solve FunCaptcha (try all available platforms)
+        # Solve FunCaptcha — CaptchaKings is the only working solver for Outlook FunCaptcha
+        # CapSolver stopped FunCaptcha support, EZCaptcha also unsupported
         fc_token = None
         for solver_name, solver_fn in [
             ("captchakings", lambda: solve_funcaptcha_captchakings(MS_SIGNUP_ARKOSE_KEY, "https://signup.live.com/signup?lic=1")),
-            ("capsolver", lambda: solve_arkose_capsolver(MS_SIGNUP_ARKOSE_KEY, "https://signup.live.com/")),
-            ("ezcaptcha", lambda: solve_funcaptcha_ezcaptcha(MS_SIGNUP_ARKOSE_KEY, "https://signup.live.com/")),
         ]:
             print(f"  {tag} trying {solver_name}...")
             fc_token = solver_fn()
