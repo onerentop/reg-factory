@@ -403,7 +403,9 @@ async def trigger_outlook_registration(body: dict = {}):
     from worker.process_manager import task_manager, _fetch_proxy_from_manager
     count = body.get("count", 1)
     proxy = body.get("proxy", "")
-    config = body.get("config", {})
+    config = dict(body.get("config", {}) or {})
+    # 注册模式：优先取 body 顶层 mode（前端下拉），回退 config.mode，默认 browser
+    config["mode"] = body.get("mode", config.get("mode", "browser"))
     if not proxy:
         proxy = _fetch_proxy_from_manager()
     task_ids = []
