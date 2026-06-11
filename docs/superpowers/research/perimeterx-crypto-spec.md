@@ -47,10 +47,24 @@ raw=base64.b64decode(p+'='*(-len(p)%4)); print(raw[:64].hex())"
 - ❌ 运行时 hook `String.prototype.{charAt,indexOf,charCodeAt,split,slice,...}`（记录 55-70 字符高独特串）→ 0 命中：字母表**不经这些方法访问**，疑似 **bracket 取值 `alphabet[i]`（JS 无法 hook 下标访问）**。
 - ❌ hook `Array.join` / `String.fromCharCode` 突发 → 只捕获到**数据字节块**（高位字节噪声），非字母表。
 
-**下一步（深 VM 逆向，团队/调试器活）**：
-1. **CDP 调试器断点**：在 `XMLHttpRequest.send` 处下断，沿调用栈上溯到 custom-base64 编码函数，在其作用域里读出 `alphabet` 变量（最直接）。
-2. **反混淆 main.min.js 的 base64 例程**：定位形如 `for(...){out+=A[(x>>k)&63]}` 的编码循环，还原 `A`（字母表数组/字符串）的构造。
-3. 拿到字母表后：用 `custom_b64decode(payload, alphabet)`（`_px_crack.py` 已实现该函数）验证是否直接出明文；若仍是密文，再做 XOR 层分析（已知明文锚点：固定前缀）。
+**已试遍的自动化途径（均未破，工具留档）**：
+| 途径 | 工具 | 结果 |
+|---|---|---|
+| 静态搜脚本字符串字面量(60-70字符) | `_px_crack.py` | 0 命中——字母表非明文字面量，VM 动态构建 |
+| 运行时 hook String.charAt/indexOf/split/slice(55-70字符高独特) | `_px_alphabet_probe.py` | 0 命中——疑 bracket 取值 `alphabet[i]`，JS 钩不到下标 |
+| hook Array.join/String.fromCharCode | 同上 | 只捕获数据字节块噪声 |
+| **CDP `setXHRBreakpoint("collector")` 断点扫 scope** | `_px_debugger_alphabet.py` | 无暂停——**Playwright 干预 Debugger 域**(自身占用/自动resume)，CDP调试器路线在 Playwright 下不可靠 |
+| hook charCodeAt 抓长串(直接取明文，绕字母表) | `_px_plaintext_probe.py` | flaky/无果(全局覆盖 charCodeAt 不稳) |
+
+**结论：自动化盲注插桩对这个 VM 内部、bracket 访问的字母表已到极限。** 最后一里最合适的工具是**人眼 + Chrome DevTools**（spec 本就把深 VM 划给逆向团队）：
+
+**推荐做法（逆向人 DevTools，分钟级）**：
+1. 在真实 ixBrowser/Chrome 打开 signup.live.com，DevTools Sources 里找 `client.hsprotect.net/PXzC5j78di/main.min.js`（或 prettify）。
+2. 在 `XMLHttpRequest.prototype.send` 设 **conditional breakpoint**（条件 `arguments[0]&&(''+arguments[0]).indexOf('payload=')>=0`），或在 Network 面板对 collector XHR 用 "Break on" → XHR/fetch。
+3. 暂停后在 **Scope 面板**目视扫 Local/Closure，找那个 64 字符乱序串（含 `^}>\``）= 字母表；或单步进编码函数看 `out += A[(x>>k)&63]` 取 `A`。
+4. 拿到字母表喂 `_px_crack.py` 的 `custom_b64decode(payload, alphabet)` 验证出明文；若仍密文再分析 XOR 层（已知明文锚点=固定前缀）。
+
+> 用脱离 Playwright 的纯 CDP（直接 websocket 连 ixBrowser 调试端口、自管 Debugger 域、不用 Playwright）也可程序化做到第 2-3 步，避开 Playwright 对 Debugger 的干预——若要继续自动化，这是正确姿势。
 
 ## 状态
 
