@@ -121,53 +121,49 @@ async def _run(proxy):
             cookies = await ctx.cookies()
         except Exception:
             cookies = []
+
+        import json as _json
+        dec = Px2Decryptor()
+        if fresh:
+            body, f = fresh
+            print(f"[forge] fresh session: seq={f.get('seq')} cs={f.get('cs','')[:16]}.. sid={f.get('sid','')[:20]}..")
+            print(f"[forge] cookies: {[c['name'] for c in cookies if c['name'].startswith(('_px','px'))]}")
+            for b, rt in resps[-4:]:
+                sq = parse_collector_body(b).plaintext_fields.get("seq", "?")
+                do, obd = "?", ""
+                try:
+                    j = _json.loads(rt); do = j.get("do")
+                    if j.get("ob"):
+                        obd = dec.decrypt(j["ob"]).decode("latin1")[:80]
+                except Exception:
+                    pass
+                print(f"   seq={sq} do={do} ob={obd!r}")
+
+            golden = _golden_presshold_blob()
+            forged_payload = _forge_payload(golden)
+            nf = dict(f); nf.pop("payload", None)
+            try:
+                nf["seq"] = str(int(f.get("seq", "0")) + 1)
+                nf["rsc"] = str(int(f.get("rsc", "1")) + 1)
+            except Exception:
+                pass
+            nf["pc"] = f.get("pc", str(int(time.time() * 1000))[-16:])
+            forged_body = "&".join(["payload=" + forged_payload] + [f"{k}={v}" for k, v in nf.items()])
+            print(f"[forge] 提交伪造长按(浏览器仍存活) body len={len(forged_body)} seq={nf['seq']}")
+            loop = asyncio.get_event_loop()
+            status, js, ob = await loop.run_in_executor(None, lambda: _submit(forged_body, proxy))
+            print(f"[forge] status={status} resp={str(js)[:160]}")
+            print(f"[forge] ob解密={ob[:300]}")
+            print(f"[forge] >>> {'★ _px3 出现! 伪造成功 ★' if '_px3' in ob else '_pxde富化' if '_pxde' in ob else '看ob'}")
+
         drive.cancel()
         try:
             await drive
         except (asyncio.CancelledError, Exception):
             pass
     bb.close_browser(pid); bb.delete_browser(pid)
-
     if not fresh:
         print("[forge] 未拿到 fresh 挑战 session（挑战未激活）")
-        return
-    body, f = fresh
-    print(f"[forge] fresh session: seq={f.get('seq')} cs={f.get('cs','')[:16]}.. sid={f.get('sid','')[:20]}..")
-    print(f"[forge] cookies: {[c['name'] for c in cookies if c['name'].startswith(('_px','px'))]}")
-    # 浏览器自己的 collector 响应词汇(看 do/ob 各态)
-    import json as _json
-    dec = Px2Decryptor()
-    print(f"[forge] 浏览器 collector 响应({len(resps)}):")
-    for b, rt in resps[-6:]:
-        seq = parse_collector_body(b).plaintext_fields.get("seq", "?")
-        do, obd = "?", ""
-        try:
-            j = _json.loads(rt); do = j.get("do")
-            if j.get("ob"):
-                obd = dec.decrypt(j["ob"]).decode("latin1")[:80]
-        except Exception:
-            pass
-        print(f"   seq={seq} do={do} ob={obd!r}")
-
-    # 组装伪造 body：复用 fresh 字段，换 payload=伪造长按，seq/rsc+1，pc 随机16位
-    golden = _golden_presshold_blob()
-    forged_payload = _forge_payload(golden)
-    nf = dict(f)
-    nf.pop("payload", None)
-    try:
-        nf["seq"] = str(int(f.get("seq", "0")) + 1)
-        nf["rsc"] = str(int(f.get("rsc", "1")) + 1)
-    except Exception:
-        pass
-    nf["pc"] = f.get("pc", str(int(time.time() * 1000))[-16:])  # 复用 fresh session 的真 pc
-    body_parts = ["payload=" + forged_payload] + [f"{k}={v}" for k, v in nf.items()]
-    forged_body = "&".join(body_parts)
-    print(f"[forge] 提交伪造长按 body len={len(forged_body)} seq={nf['seq']}")
-
-    status, js, ob = _submit(forged_body, proxy)
-    print(f"[forge] status={status} resp={str(js)[:160]}")
-    print(f"[forge] ob解密={ob[:300]}")
-    print(f"[forge] >>> {'★ _px3 出现! 伪造成功 ★' if '_px3' in ob else '_pxde只有富化/未清关' if '_pxde' in ob else '看ob'}")
 
 
 if __name__ == "__main__":
