@@ -36,7 +36,23 @@ python -c "import base64; p=open('docs/superpowers/research/_px_payload0_sample.
 raw=base64.b64decode(p+'='*(-len(p)%4)); print(raw[:64].hex())"
 ```
 
+## 更深一层实测（2026-06-11 续）：是**自定义 base64 字母表**，非标准 base64
+
+进一步分析 payload 字符集发现：它用了 `^ } > \`` 等**非标准 base64 字符**，且**缺** `6 O q u v y` 等标准字符 → 这是 **PerimeterX 经典的自定义 base64 字母表（64 字符乱序置换）**。之前"标准 base64 解码出低熵结构字节"其实是**用错字母表的结果**（标准 b64decode 默认忽略非法字符），并非真明文。
+
+**正确解码链 = 自定义字母表 base64 解码 →（可能还有一层 XOR/变换）→ 明文。** 第一关是**拿到那张 64 字符字母表**。
+
+**字母表提取已试且未果的途径**（`_px_crack.py` / `_px_alphabet_probe.py`）：
+- ❌ 静态搜 main.min.js 的字符串字面量（长度 60-70、含全部 payload 字符）→ 0 命中：字母表**不是明文字符串字面量**，VM 内动态构建。
+- ❌ 运行时 hook `String.prototype.{charAt,indexOf,charCodeAt,split,slice,...}`（记录 55-70 字符高独特串）→ 0 命中：字母表**不经这些方法访问**，疑似 **bracket 取值 `alphabet[i]`（JS 无法 hook 下标访问）**。
+- ❌ hook `Array.join` / `String.fromCharCode` 突发 → 只捕获到**数据字节块**（高位字节噪声），非字母表。
+
+**下一步（深 VM 逆向，团队/调试器活）**：
+1. **CDP 调试器断点**：在 `XMLHttpRequest.send` 处下断，沿调用栈上溯到 custom-base64 编码函数，在其作用域里读出 `alphabet` 变量（最直接）。
+2. **反混淆 main.min.js 的 base64 例程**：定位形如 `for(...){out+=A[(x>>k)&63]}` 的编码循环，还原 `A`（字母表数组/字符串）的构造。
+3. 拿到字母表后：用 `custom_b64decode(payload, alphabet)`（`_px_crack.py` 已实现该函数）验证是否直接出明文；若仍是密文，再做 XOR 层分析（已知明文锚点：固定前缀）。
+
 ## 状态
 
-载荷加密：**已刻画为 base64+XOR/结构化弱加密（可破）**，XOR key 提取是 Phase 2 第一关。
-`PayloadDecryptor`（Task 14）待 key 确定后按本规格实现（接口已就绪：`analysis/decryptor.py`）。
+载荷加密：**确认为 自定义base64字母表( + 可能一层XOR )**。字母表静态/常规-hook 均未提取到 → 需**调试器断点或 base64 例程反混淆**（深 VM）。
+`custom_b64decode()` 工具已就绪（`_px_crack.py`）；`PayloadDecryptor`（Task 14）待字母表确定后实现（接口已就绪 `analysis/decryptor.py`）。
