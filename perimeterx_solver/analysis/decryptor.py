@@ -38,3 +38,15 @@ class Px2Decryptor(PayloadDecryptor):
     def decrypt_text(self, encrypted_blob: str, context: dict = None) -> str:
         """latin1 文本视图（二进制指纹值保留为高位字符），便于人读结构。"""
         return self.decrypt(encrypted_blob, context).decode("latin1")
+
+
+class Px2Encoder:
+    """明文字节 → PerimeterX collector payload（XOR 0x32 → 标准 base64）。Px2Decryptor 的逆。
+
+    用于 Phase 2 伪造：PayloadBuilder 组装 JSON 明文 → 本编码器 → `payload=<blob>` 提交。
+    """
+
+    XOR_KEY = 0x32
+
+    def encode(self, plaintext: bytes, context: dict = None) -> str:
+        return base64.b64encode(bytes(c ^ self.XOR_KEY for c in plaintext)).decode()

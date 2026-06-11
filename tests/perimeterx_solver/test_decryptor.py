@@ -2,7 +2,7 @@
 import base64
 import os
 
-from perimeterx_solver.analysis.decryptor import Px2Decryptor, PayloadDecryptor
+from perimeterx_solver.analysis.decryptor import Px2Decryptor, PayloadDecryptor, Px2Encoder
 
 FIX = os.path.join(os.path.dirname(__file__), "real_payload.b64")
 GOLDEN_PH = os.path.join(os.path.dirname(__file__), "golden_presshold.b64")
@@ -34,6 +34,21 @@ def test_px2_decrypts_real_collector_payload():
     assert b"hsprotect.net" in out
     assert b"PXzC5j78di" in out
     assert b"session_id" in out
+
+
+def test_px2_encoder_is_inverse_of_decryptor():
+    pt = b'[{"t":"abc","d":{"k":1,"u":"https://x"}}]'
+    blob = Px2Encoder().encode(pt)
+    assert Px2Decryptor().decrypt(blob) == pt
+
+
+def test_px2_encoder_roundtrips_real_golden():
+    # 解密真实长按黄金 → 重新编码 → 再解密应一致（证明能产出合法 payload）
+    blob = open(GOLDEN_PH, encoding="utf-8").read().strip()
+    pt = Px2Decryptor().decrypt(blob)
+    reblob = Px2Encoder().encode(pt)
+    assert Px2Decryptor().decrypt(reblob) == pt
+    assert b"#px-captcha" in Px2Decryptor().decrypt(reblob)
 
 
 def test_px2_handles_malformed_length():
