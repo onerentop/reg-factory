@@ -29,9 +29,30 @@
 - 值类型：URL、字符串(平台/语言等)、数字、UUID、**原始二进制指纹哈希**（故明文非严格 JSON）。
 - query-string 形态的外层字段（`appId=/tag=/uuid=/seq=/pxhd=/jsc=/rsc=`）是 **body 层**（payload 之外的 form 字段），调试器闭包常量已暴露。
 
+## ✅ 真人 PASS 长按遥测黄金样本（2026-06-11 捕获并解密）
+
+`_golden_capture.py` 真人手动长按过码成功（还顺带建成一个真账号 + refresh_token），抓到 9 个 collector 载荷，解密后**长按遥测载荷**（含 `#px-captcha`）结构如下（字段名 base64 混淆，值已明）：
+
+```json
+[{"t":"W0cqQR4rLnA=","d":{
+  "...":["BODY","#px-captcha",""],     // 长按目标元素选择器
+  "...":"pointerdown", "...":582, "...":718.67,   // 按下事件 + clientX/Y
+  "...":236.67, "...":19.67,            // movementX/Y 或 偏移
+  "...":"pointerup",   "...":582, "...":718.67,   // 抬起事件 + 坐标
+  "...":11684,                          // 长按时长(ms) ≈ 11.7s(真人)
+  "...":[9170],                         // 时序数组
+  "...":true, "...":"de-DE",            // locale
+  "...":"633b07d8dec44e7a..."           // 某 hash/id
+}}]
+```
+
+- **这是 PerimeterX 判人/机的核心行为遥测**：真人的 pointerdown→pointerup 坐标轨迹 + 时长 + movement。
+- 黄金模板存于 `docs/superpowers/research/perimeterx-golden-presshold.json`（解密全文）+ 密文夹具 `tests/perimeterx_solver/golden_presshold.b64`（回归测试用）。
+- **Phase 2 直接复用此真人模板**伪造长按遥测（重放真实坐标/时长/movement 分布），无需自己造行为数据。
+
 ## 待细化
 - 解开各混淆字段名（base64 → 可能再 XOR/查表）得到可读语义名。
-- 真人 PASS 黄金样本解密后，`SchemaDiffer` 对比真人 vs 机器，定位长按判别字段（Phase 2 靶向）。
+- 可选：捕获机器 FAIL 长按会话载荷，`SchemaDiffer` 对比真人 vs 机器，定位最敏感判别字段（精修 Phase 2）。
 
 ---
 

@@ -5,6 +5,7 @@ import os
 from perimeterx_solver.analysis.decryptor import Px2Decryptor, PayloadDecryptor
 
 FIX = os.path.join(os.path.dirname(__file__), "real_payload.b64")
+GOLDEN_PH = os.path.join(os.path.dirname(__file__), "golden_presshold.b64")
 
 
 def _enc(plaintext: bytes) -> str:
@@ -33,3 +34,17 @@ def test_px2_decrypts_real_collector_payload():
     assert b"hsprotect.net" in out
     assert b"PXzC5j78di" in out
     assert b"session_id" in out
+
+
+def test_px2_handles_malformed_length():
+    # len%4==1 的畸形/截断 base64 不应崩溃（容错截断）
+    Px2Decryptor().decrypt("A" * 37)  # 37 % 4 == 1
+
+
+def test_px2_decrypts_golden_presshold_telemetry():
+    # 真人 PASS 长按遥测黄金样本：含 pointerdown/up + #px-captcha 目标
+    blob = open(GOLDEN_PH, encoding="utf-8").read().strip()
+    out = Px2Decryptor().decrypt(blob).decode("latin1")
+    assert "#px-captcha" in out
+    assert "pointerdown" in out and "pointerup" in out
+    assert "de-DE" in out

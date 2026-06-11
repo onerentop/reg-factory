@@ -30,6 +30,8 @@ class Px2Decryptor(PayloadDecryptor):
             s = s[len("payload="):]
         s = s.split("&", 1)[0]              # 容错：body 里 payload 后可能跟其它表单字段
         s = _B64_ONLY.sub("", s)            # 剔除非标准base64字符(捕获伪影/杂散)+去原padding
+        if len(s) % 4 == 1:                 # 畸形/截断：末尾不完整 base64 组，丢弃
+            s = s[:-1]
         raw = base64.b64decode(s + "=" * (-len(s) % 4))
         return bytes(c ^ self.XOR_KEY for c in raw)
 
