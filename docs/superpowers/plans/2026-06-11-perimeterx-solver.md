@@ -902,7 +902,7 @@ async def _run(mode, proxy):
     s.script_refs = scripts
     s.pointer_stream = pointer
     corpus.save(s)
-    print(f"[recon] outcome={s.outcome} run_id={s.run_id} reqs={len(s.captured)} scripts={len(scripts)}")
+    print(f"[recon] outcome={s.outcome} run_id={s.run_id} reqs={len(rec.captured)} scripts={len(scripts)}")
     print(f"[recon] collector payloads={len(rec.collector_payloads())}")
 
 

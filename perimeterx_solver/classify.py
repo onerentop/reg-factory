@@ -30,7 +30,9 @@ def classify_px_url(url: str, method: str) -> PxKind:
         return PxKind.OTHER
     path = (urlparse(url).path or "").lower()
     host = (urlparse(url).hostname or "").lower()
-    if "/collector" in path and method.upper() == "POST":
+    # collector 实测是 collector-<appid>.hsprotect.net/api/v2/msft（MS专属，路径不含 "collector"）；
+    # 同时保留通用 "/collector" 路径兜底。靠 collector- 主机名前缀识别更稳。
+    if method.upper() == "POST" and (host.startswith("collector-") or "/collector" in path):
         return PxKind.COLLECTOR
     if path.endswith(".js"):
         return PxKind.SCRIPT

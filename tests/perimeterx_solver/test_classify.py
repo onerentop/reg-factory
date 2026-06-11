@@ -11,6 +11,8 @@ def test_is_px_url():
 
 def test_classify_px_url():
     assert classify_px_url("https://PXzC5j78di.px-cdn.net/api/v2/collector", "POST") == PxKind.COLLECTOR
+    # 实测 MS 真端点：collector- 主机名 + /api/v2/msft 路径（不含 "collector"）
+    assert classify_px_url("https://collector-pxzc5j78di.hsprotect.net/api/v2/msft", "POST") == PxKind.COLLECTOR
     assert classify_px_url("https://client.px-cloud.net/PXzC5j78di/main.min.js", "GET") == PxKind.SCRIPT
     assert classify_px_url("https://iframe.hsprotect.net/index.html?app_id=PXzC5j78di", "GET") == PxKind.CHALLENGE_IFRAME
     assert classify_px_url("https://x.px-cdn.net/favicon.ico", "GET") == PxKind.OTHER

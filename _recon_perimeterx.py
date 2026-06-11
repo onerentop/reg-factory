@@ -61,6 +61,7 @@ async def _run(mode, proxy):
 
         await page.goto(SIGNUP, wait_until="domcontentloaded", timeout=60000)
         snaps.append(snap.snapshot("on_load", time.time(), await ctx.cookies()))
+        confirmed = "fail"
         if mode == "human":
             print(">>> 真人手动：完整填表并长按过码，过了再回车 <<<")
             await asyncio.get_event_loop().run_in_executor(None, input)
@@ -68,23 +69,25 @@ async def _run(mode, proxy):
                 pointer = await page.evaluate("window.__pxptr || []")
             except Exception:
                 pointer = []
+            # _px3 仅加载就常驻，不能据此判过；让真人显式确认（黄金样本命脉）
+            ans = await asyncio.get_event_loop().run_in_executor(
+                None, lambda: input("过码成功了吗? y=成功(黄金) / 其它=失败: "))
+            confirmed = "pass" if ans.strip().lower() == "y" else "fail"
         else:
-            await asyncio.sleep(60)  # bot：等挑战出现/失败
+            await asyncio.sleep(60)  # bot：等挑战出现/失败（不长按，记为 fail）
         snaps.append(snap.snapshot("after_attempt", time.time(), await ctx.cookies()))
-        final = await ctx.cookies()
 
     bb.close_browser(pid); bb.delete_browser(pid)
     corpus = SampleCorpus()
-    from perimeterx_solver.recon.harness import outcome_from_cookies
     from perimeterx_solver.models import Sample
-    s = Sample(run_id=f"{mode}_{int(time.time())}", outcome=outcome_from_cookies(final),
+    s = Sample(run_id=f"{mode}_{int(time.time())}", outcome=confirmed,
                meta={"mode": mode, "proxy": proxy})
     s.requests = rec.captured
     s.cookie_snapshots = snaps
     s.script_refs = scripts
     s.pointer_stream = pointer
     corpus.save(s)
-    print(f"[recon] outcome={s.outcome} run_id={s.run_id} reqs={len(s.captured)} scripts={len(scripts)}")
+    print(f"[recon] outcome={s.outcome} run_id={s.run_id} reqs={len(rec.captured)} scripts={len(scripts)}")
     print(f"[recon] collector payloads={len(rec.collector_payloads())}")
 
 
