@@ -64,3 +64,11 @@ class Sample:
         s.requests = [CapturedRequest.from_dict(x) for x in d.get("requests", [])]
         s.cookie_snapshots = [CookieSnapshot.from_dict(x) for x in d.get("cookie_snapshots", [])]
         return s
+
+
+@dataclass
+class TracedPayload:
+    egress_url: str = ""
+    egress_body_head: str = ""
+    plaintext_head: str = ""
+    encoding_chain: list = field(default_factory=list)  # 经过的编码事件 kind 序列
