@@ -36,7 +36,23 @@ python -c "import base64; p=open('docs/superpowers/research/_px_payload0_sample.
 raw=base64.b64decode(p+'='*(-len(p)%4)); print(raw[:64].hex())"
 ```
 
-## 更深一层实测（2026-06-11 续）：是**自定义 base64 字母表**，非标准 base64
+## ⚠️ 重大修正（2026-06-11 原始CDP调试器实测）：是**标准 base64**，非自定义字母表
+
+原始 CDP 调试器（`_px_rawcdp_alphabet.py`）在 collector XHR 发送处断点、dump 编码器调用栈，**直接看到编码器用的是标准 base64 字母表**：
+`ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=`（变量 `W`/`Ot`）。
+
+**之前"自定义字母表(含 `^}>\``、缺 `6Oquvy`)"的判断作废**——那是提取 payload 值时混入脏字符/截断的假象。payload 用标准 `base64.b64decode` 本就成功（`aUkQRhAIEH...`→`694910461008...`）。
+
+**真实编码链：`payload = 标准base64( XOR/变换(明文) )`。**
+- 明文是 **query-string 格式**（调试器暴露字段前缀常量）：`seq= appId= uuid= tag= pxhd= jsc= rsc=`，例 `appId=PXzC5j78di`。
+- 内层 XOR/变换的 key **未定**：候选 `gt='YjIYfyxJHRR9'`(12字符) + 大量 4 字符串(`KI4g/qTTB/upGV/Mp0m/...`)；简单重复 XOR(gt/appId/4字符串) 均未解出明文 → key 更复杂(可能位置相关/长keystream/或XOR发生在query-string组装前)。
+- XHR-send 断点处明文已编码完毕，抓不到原文；需在**编码器入口断点**抓明文输入(下一迭代)。
+
+**原始 CDP 调试器关键修复(已工作)**：① `suppress_origin=True`(绕 Chrome --remote-allow-origins 403)；② **每个 page session 递归 `Target.setAutoAttach`**(否则 hsprotect OOPIF iframe 不附着、collector XHR 抓不到——这是断点不触发的根因)；③ 事件入持久队列(wait_resp 不丢 attachedToTarget)；④ `DOMDebugger.setXHRBreakpoint("collector")` 在 iframe session 触发。dump 全套：`Runtime.getProperties` 扫 scope + `evaluateOnCallFrame` 抓实参 + `getScriptSource` 取源码。
+
+---
+
+## 历史误判记录（已被上方修正推翻）：自定义 base64 字母表
 
 进一步分析 payload 字符集发现：它用了 `^ } > \`` 等**非标准 base64 字符**，且**缺** `6 O q u v y` 等标准字符 → 这是 **PerimeterX 经典的自定义 base64 字母表（64 字符乱序置换）**。之前"标准 base64 解码出低熵结构字节"其实是**用错字母表的结果**（标准 b64decode 默认忽略非法字符），并非真明文。
 
