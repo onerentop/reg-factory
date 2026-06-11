@@ -11,6 +11,7 @@ if sys.platform == "win32":
 # 策略：少按多轮换 IP——一个出口 IP 上反复长按会被 PerimeterX 标记（毒化），
 # 接 rebrowser 隐身后若能过，往往前几次就过；过不了就废弃本窗口换新 sid。
 os.environ.setdefault("OUTLOOK_REG_MAX_PRESS", "4")
+os.environ.setdefault("OUTLOOK_PRESS_HARD_CAP", "1")  # 按满即放弃，不在同一 IP 反复磨
 
 import config  # noqa: 触发 .env
 from common.stealth_playwright import stealth_banner
@@ -53,12 +54,23 @@ async def _drive_and_capture(proxy_str):
             await page.route("**/API/CreateAccount*", _intercept)
 
             drive = asyncio.create_task(register_outlook(page, context, 0))
-            try:
-                cap = await asyncio.wait_for(asyncio.shield(fut), timeout=420)
-            except asyncio.TimeoutError:
+            # 截获 future 与 drive 任务竞速：drive 提前结束（长按硬上限放弃）则立刻收尾，
+            # 不再傻等满 420s。
+            done, _pending = await asyncio.wait(
+                {fut, drive}, timeout=420, return_when=asyncio.FIRST_COMPLETED
+            )
+            if fut not in done:
                 drive.cancel()
-                print("[spike] CreateAccount 未被触发/截获，超时")
+                try:
+                    await drive
+                except (asyncio.CancelledError, Exception):
+                    pass
+                if drive in done:
+                    print("[spike] 长按未过（硬上限放弃）— 未截获，轮换 sid 重试")
+                else:
+                    print("[spike] CreateAccount 未被触发/截获，超时")
                 return None
+            cap = fut.result()
             drive.cancel()
             try:
                 await drive

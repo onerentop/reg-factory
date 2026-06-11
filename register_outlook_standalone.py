@@ -1385,6 +1385,11 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False):
                     arkose_solved = True
                     print(f"  {tag} captcha solvers unavailable — aborting early")
                     return None, None
+                elif os.environ.get("OUTLOOK_PRESS_HARD_CAP", "").strip() in ("1", "true", "True"):
+                    # 硬上限策略（少按多轮换 IP）：按满 max_press 即放弃，不在同一出口 IP 上
+                    # 反复磨（重置继续按会毒化 IP 且白等超时）。交由外层轮换 sid 换新 IP 重试。
+                    print(f"  {tag} 长按 {max_press} 次未过 — 硬上限放弃（轮换 IP 重试）")
+                    return None, None
                 else:
                     # Browser/ixBrowser mode: reset counter so pressing continues.
                     # max_press is already 15 for browser mode; just reset progress.
