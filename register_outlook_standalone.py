@@ -33,7 +33,8 @@ if sys.platform == "win32":
         pass
 
 import requests
-from playwright.async_api import async_playwright
+# 隐身入口：优先 rebrowser-playwright（堵 Runtime.enable CDP 泄漏，对 connect_over_cdp 生效）
+from common.stealth_playwright import async_playwright
 from common.browser_provider import get_browser_provider
 from common.ixbrowser_provider import IXBrowserProvider
 try:
@@ -1242,11 +1243,12 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False):
                     await asyncio.sleep(random.uniform(0.1, 0.3))
                     await page.mouse.down()
 
-                    hold_time = random.uniform(8, 18)
+                    # 长按窗口 6–9s：PerimeterX 的"必需时长"约 8–10s，按到 18s 反而有过冲被重置风险。
+                    hold_time = random.uniform(6, 9)
                     hold_start = asyncio.get_event_loop().time()
                     while asyncio.get_event_loop().time() - hold_start < hold_time:
-                        # Minimal micro-tremor to simulate human hand
-                        await page.mouse.move(cx + random.uniform(-0.8, 0.8), cy + random.uniform(-0.8, 0.8))
+                        # 略放大的微抖（真人手指漂移更明显），节奏随机
+                        await page.mouse.move(cx + random.uniform(-1.5, 1.5), cy + random.uniform(-1.5, 1.5))
                         await asyncio.sleep(random.uniform(0.08, 0.25))
 
                     await page.mouse.up()

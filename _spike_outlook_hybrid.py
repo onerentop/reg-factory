@@ -2,13 +2,18 @@
 """Phase 0 验证：浏览器铸 HSol → 协议 replay 能否被 MS 接受。一次性脚本，验证后删除。
 用法：python _spike_outlook_hybrid.py "<proxy_str>"
 """
-import asyncio, json, sys, time
+import asyncio, json, os, sys, time
 import requests
 
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8")
 
+# 策略：少按多轮换 IP——一个出口 IP 上反复长按会被 PerimeterX 标记（毒化），
+# 接 rebrowser 隐身后若能过，往往前几次就过；过不了就废弃本窗口换新 sid。
+os.environ.setdefault("OUTLOOK_REG_MAX_PRESS", "4")
+
 import config  # noqa: 触发 .env
+from common.stealth_playwright import stealth_banner
 from common.browser_provider import get_browser_provider
 from register_outlook_standalone import (
     register_outlook, _proxy_for_requests, verify_registered_outlook,
@@ -17,7 +22,7 @@ from register_outlook_standalone import (
 
 async def _drive_and_capture(proxy_str):
     """起浏览器跑 register_outlook，路由拦截 CreateAccount，截获 payload/headers/cookies/UA 后 abort。"""
-    from playwright.async_api import async_playwright
+    from common.stealth_playwright import async_playwright
     bb = get_browser_provider()
     profile_id = bb.create_browser(name="spike_outlook", proxy_str=proxy_str)
     info = bb.open_browser(profile_id)
@@ -111,6 +116,8 @@ def _replay(captured, proxy_str):
 
 async def _main():
     proxy_str = sys.argv[1] if len(sys.argv) > 1 else ""
+    print(stealth_banner())
+    print(f"[spike] OUTLOOK_REG_MAX_PRESS={os.environ.get('OUTLOOK_REG_MAX_PRESS')}（少按多轮换 IP）")
     captured = await _drive_and_capture(proxy_str)
     if not captured:
         print("[spike] 结论：未能截获，检查浏览器/验证码")
