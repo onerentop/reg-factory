@@ -595,6 +595,31 @@ async def extract_graph_token(page, context, email, password, idx=0):
 
 # ======================== Outlook Registration ========================
 
+async def _warm_session(page, idx, tag):
+    """会话预热：注册前先访问 MS 首页 + 人类化活动(鼠标/滚动/停顿)，再去 signup。
+    PerimeterX 会话级 ML 把"冷会话直达高价值页"判为强自动化信号，预热 +10-15% 成功率。
+    可用 OUTLOOK_NO_WARMUP=1 关闭。"""
+    if os.environ.get("OUTLOOK_NO_WARMUP", "").strip() in ("1", "true", "True"):
+        return
+    try:
+        print(f"  {tag} warming session (outlook.com)...")
+        await page.goto("https://outlook.com/", timeout=45000, wait_until="domcontentloaded")
+        # 人类化活动：随机鼠标移动 + 偶尔滚动 + 自然停顿
+        for _ in range(random.randint(4, 7)):
+            await page.mouse.move(random.uniform(120, 1100), random.uniform(120, 650),
+                                  steps=random.randint(6, 18))
+            await asyncio.sleep(random.uniform(0.4, 1.3))
+        try:
+            await page.mouse.wheel(0, random.uniform(250, 700))
+            await asyncio.sleep(random.uniform(0.6, 1.5))
+            await page.mouse.wheel(0, random.uniform(-200, 400))
+        except Exception:
+            pass
+        await asyncio.sleep(random.uniform(2.0, 4.0))   # 停留，建立会话历史
+    except Exception as e:
+        print(f"  {tag} warm-up skipped: {str(e)[:80]}")
+
+
 async def register_outlook(page, context, idx=0, captcha_early_abort=False):
     """
     Register a new Outlook email account.
@@ -608,9 +633,11 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False):
     tag = f"[#{idx}]"
 
     try:
+        await _warm_session(page, idx, tag)   # 会话预热(+10-15%)，再去 signup 带上自然来路
         print(f"  {tag} navigating to signup page...")
-        await page.goto("https://signup.live.com/signup?lic=1", timeout=60000, wait_until="domcontentloaded")
-        await asyncio.sleep(3)
+        await page.goto("https://signup.live.com/signup?lic=1", timeout=60000,
+                        wait_until="domcontentloaded", referer="https://outlook.com/")
+        await asyncio.sleep(random.uniform(2.5, 4.5))
         await page.screenshot(path=f"{SCREENSHOT_DIR}/outlook_{idx}_start.png")
 
         # Handle privacy/consent pages (Chinese "个人数据导出许可", "同意并继续", etc.)
@@ -1072,7 +1099,15 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False):
 
         # Step 6: CAPTCHA handling
         print(f"  {tag} checking for captcha...")
-        await asyncio.sleep(3)
+        # 按之前的人类化活动：自然鼠标游走 + 停顿，给 PX 一段"人在看挑战"的行为遥测
+        try:
+            for _ in range(random.randint(2, 4)):
+                await page.mouse.move(random.uniform(200, 900), random.uniform(200, 600),
+                                      steps=random.randint(8, 20))
+                await asyncio.sleep(random.uniform(0.3, 0.9))
+        except Exception:
+            pass
+        await asyncio.sleep(random.uniform(2.5, 4.0))
 
         arkose_solved = False
         press_count = 0
@@ -1257,8 +1292,8 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False):
                     await asyncio.sleep(random.uniform(0.1, 0.3))
                     await page.mouse.down()
 
-                    # 长按窗口 6–9s：PerimeterX 的"必需时长"约 8–10s，按到 18s 反而有过冲被重置风险。
-                    hold_time = random.uniform(6, 9)
+                    # 长按窗口 9–12s：PX 强制时长约 8–10s，真人黄金那次 ~11.7s；6s 偏短进度环可能没填满。
+                    hold_time = random.uniform(9, 12)
                     hold_start = asyncio.get_event_loop().time()
                     while asyncio.get_event_loop().time() - hold_start < hold_time:
                         # 略放大的微抖（真人手指漂移更明显），节奏随机

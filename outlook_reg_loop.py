@@ -328,8 +328,9 @@ def main():
                          "(0 = no cap; producer always runs)")
     ap.add_argument("--max-press", default="3",
                     help="OUTLOOK_REG_MAX_PRESS — captcha press-and-hold cap")
-    ap.add_argument("--timeout", type=int, default=180,
-                    help="hard cap per attempt (seconds)")
+    ap.add_argument("--timeout", type=int, default=240,
+                    help="hard cap per attempt (seconds). 含会话预热(~15s)+表单+长按+graph取token，"
+                         "180 太紧会把已建成的号超时丢掉")
     ap.add_argument("--sleep", type=int, default=5,
                     help="seconds between attempts (after fail or success)")
     ap.add_argument("--sleep-when-full", type=int, default=60,
