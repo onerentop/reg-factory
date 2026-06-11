@@ -1095,6 +1095,12 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False):
         _capped_rounds = max(8, max_press * 4 + 8)
         _captcha_rounds = min(_captcha_rounds, _capped_rounds)
 
+        # 真人长按模式：脚本只自动填表到挑战出现，长按交给真人；轮询等过、不自动按、不抢鼠标。
+        human_press = os.environ.get("OUTLOOK_HUMAN_PRESS", "").strip() in ("1", "true", "True")
+        _hp_announced = False
+        if human_press:
+            _captcha_rounds = int(os.environ.get("OUTLOOK_HUMAN_WAIT_ROUNDS", "90"))  # ~90*3s ≈ 4.5min
+
         for wait_round in range(_captcha_rounds):
             try:
                 page_text = (await page.evaluate("() => document.body.innerText")).lower()
@@ -1167,6 +1173,14 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False):
                             break
                         except Exception:
                             pass
+                await asyncio.sleep(3)
+                continue
+
+            # 真人长按模式：不自动按，轮询等真人在窗口里长按过码（顶部成功检测会捕捉通过）
+            if human_press:
+                if not _hp_announced:
+                    print(f"  {tag} >>> 请在浏览器窗口里手动长按过码（脚本不自动按、不抢鼠标，轮询等你过）<<<")
+                    _hp_announced = True
                 await asyncio.sleep(3)
                 continue
 
