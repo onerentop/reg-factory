@@ -45,3 +45,7 @@ frontend/node_modules/
 frontend/dist/
 frontend/%USERPROFILE%/
 %USERPROFILE%/
+
+# PerimeterX 逆向运行期捕获产物（脚本原文/载荷/样本，不入库）
+perimeterx_solver/corpus/
+_px_events.json
