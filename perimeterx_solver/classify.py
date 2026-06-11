@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from urllib.parse import urlparse, parse_qs
 
-_PX_HOST_SUFFIXES = (".px-cdn.net", ".px-cloud.net", "hsprotect.net", ".pxchk.net")
+_PX_HOST_SUFFIXES = (".px-cdn.net", ".px-cloud.net", ".hsprotect.net", ".pxchk.net")
 _PX_HOST_CONTAINS = ("px-cloud.net", "px-cdn.net")
 
 

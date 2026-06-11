@@ -53,10 +53,8 @@ class Sample:
             raise ValueError(f"outcome must be one of {_VALID_OUTCOMES}, got {self.outcome!r}")
 
     def to_dict(self):
-        d = asdict(self)
-        d["requests"] = [r.to_dict() if isinstance(r, CapturedRequest) else r for r in self.requests]
-        d["cookie_snapshots"] = [c.to_dict() if isinstance(c, CookieSnapshot) else c for c in self.cookie_snapshots]
-        return d
+        # asdict 递归序列化所有嵌套 dataclass（requests/cookie_snapshots），from_dict 负责还原。
+        return asdict(self)
 
     @classmethod
     def from_dict(cls, d):
