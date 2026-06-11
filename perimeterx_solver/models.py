@@ -72,3 +72,9 @@ class TracedPayload:
     egress_body_head: str = ""
     plaintext_head: str = ""
     encoding_chain: list = field(default_factory=list)  # 经过的编码事件 kind 序列
+
+
+@dataclass
+class CryptoFinding:
+    kinds: list = field(default_factory=list)   # ['base64','aes','xor',...]
+    evidence: list = field(default_factory=list)  # 命中事件摘要
