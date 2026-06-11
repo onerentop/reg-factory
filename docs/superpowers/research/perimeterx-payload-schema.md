@@ -1,11 +1,43 @@
-# PerimeterX collector 载荷 schema（部分实测，明文字段待解密）
+# PerimeterX collector 载荷 schema —— ✅ 已解密
 
 - 日期：2026-06-11
-- 来源：`_instrument_perimeterx.py` hook 事件（`_px_events.json`，1438 事件）
+- 来源：原始CDP调试器 dump（`_px_pause_dump.json`）+ `Px2Decryptor` 解密
 
-## 状态说明
+## ✅ 解密后真实结构
 
-collector 的**最终上报载荷在加密串内**（base64+XOR，见 [crypto-spec](perimeterx-crypto-spec.md)），完整明文字段清单**待 XOR key 还原后**从密文解出。本文记录**已通过 hook 直接观测到的「collector 采集面」**——即它读了哪些指纹/行为信号（这些最终会进加密载荷）。
+`payload = base64(XOR(JSON, 0x32))`（见 [crypto-spec](perimeterx-crypto-spec.md)）。解出的明文是 JSON：
+
+```
+[
+  {
+    "t": "<混淆类型id, base64>",           // 例 "GCQiLl1BJhk="
+    "d": {                                 // data 字典
+      "<混淆字段名base64>": <值>,           // 字段名经 base64 混淆(VM字符串表)
+      "SlpwEAw5eSc=": "https://iframe.hsprotect.net/index.html?app_id=PXzC5j78di&session_id=<uuid>",
+      "VQEvCxBmIj4=": 1,
+      "dWFPKzAARxE=": "Win32",             // navigator.platform
+      "<...>": <二进制指纹哈希>,            // canvas/audio/webgl，嵌入的高位字节
+      "<...>": "b08a1160-6555-...",        // 某 UUID
+      ...
+    }
+  },
+  ... // 多个采集事件对象
+]
+```
+
+- 字段名是 **base64 混淆**（解开后还需对照 VM 字符串表/二次解码才得可读名——下一步）。
+- 值类型：URL、字符串(平台/语言等)、数字、UUID、**原始二进制指纹哈希**（故明文非严格 JSON）。
+- query-string 形态的外层字段（`appId=/tag=/uuid=/seq=/pxhd=/jsc=/rsc=`）是 **body 层**（payload 之外的 form 字段），调试器闭包常量已暴露。
+
+## 待细化
+- 解开各混淆字段名（base64 → 可能再 XOR/查表）得到可读语义名。
+- 真人 PASS 黄金样本解密后，`SchemaDiffer` 对比真人 vs 机器，定位长按判别字段（Phase 2 靶向）。
+
+---
+
+## （历史）hook 观测到的采集面
+
+以下为 Phase 1 中途 hook 直接观测（仍有效，与解密结果互证）：
 
 ## 已观测的采集面（hook 直接抓到）
 

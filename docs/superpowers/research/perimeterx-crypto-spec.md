@@ -1,4 +1,20 @@
-# PerimeterX collector 载荷加密规格（实测刻画，逆向进行中）
+# PerimeterX collector 载荷加密规格 —— ✅ 已破解
+
+## ✅ 最终结论（2026-06-11，原始CDP调试器 + 已知明文攻击确证）
+
+**`payload = 标准base64( 单字节 XOR 0x32 ( JSON明文 ) )`**
+
+- 解密：`bytes(c ^ 0x32 for c in base64.b64decode(payload))` → JSON 明文。
+- 明文结构：`[{"t":"<混淆类型id base64>","d":{"<混淆字段名 base64>":值, ...}}]`。值有明文(URL/Win32/数字/UUID)+ **嵌入的二进制指纹哈希**(canvas/audio/webgl，故非严格 JSON、含高位字节)。
+- 实测验证含 `https://iframe.hsprotect.net/...app_id=PXzC5j78di&session_id=...`、`Win32` 等。
+- 实现：`perimeterx_solver/analysis/decryptor.py` 的 **`Px2Decryptor`**（Task 14 完成），测试 `tests/perimeterx_solver/test_decryptor.py` 在真实抓包夹具 `real_payload.b64` 上验证通过。
+- 破解路径：原始CDP调试器(`_px_rawcdp_alphabet.py`)断在 collector XHR、dump 编码器栈 → 看到标准base64字母表 + appId 在明文 → 用 `PXzC5j78di` 做已知明文 crib-drag → 命中单字节 XOR 0x32。
+
+**注**：下方为破解过程中的历史刻画（含一度的"自定义字母表"误判，已被上方推翻），保留作记录。
+
+---
+
+# （历史）PerimeterX collector 载荷加密规格（实测刻画过程）
 
 - 日期：2026-06-11
 - 来源：`_instrument_perimeterx.py` 活体插桩（捕获 1438 个 hook 事件，`_px_events.json`）
