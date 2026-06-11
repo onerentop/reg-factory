@@ -11,8 +11,18 @@ Usage:
   python outlook_reg_loop.py                       # loop forever
   python outlook_reg_loop.py --count 20            # 20 attempts then exit
   python outlook_reg_loop.py --target-pool 10      # stop refilling once pool >= 10
-  python outlook_reg_loop.py --max-press 5         # OUTLOOK_REG_MAX_PRESS
+  python outlook_reg_loop.py --max-press 8         # OUTLOOK_REG_MAX_PRESS
   python outlook_reg_loop.py --sleep 5             # gap between attempts (s)
+
+★ PerimeterX 长按全自动方案（2026-06-11 实测）★：
+  press-and-hold 是 IP 声誉主导。**干净住宅 IP 上自动长按直接过**（实测 1024proxy BE/VOO
+  住宅 ~67%/次，每次 1-2 按；配本循环的每次 rotate_proxy_sid 换 IP + 失败重试 → 接近 100%）。
+  关键是喂【干净、未被烧的住宅 IP 源】。原始失败都是 IP 被标记（见记忆 perimeterx-ip-reputation-burn）。
+  配置（PowerShell）：
+    $env:OUTLOOK_PROXIES="socks5://us.1024proxy.io:3000:sb7f3017-region-BE-sid-Q7GXp9aN-t-5:f3vxcmih"
+    python outlook_reg_loop.py --count 20 --max-press 8
+  本循环已：每次 rotate sid 换出口 IP、自动长按(register_outlook 默认)、成功存号(含 refresh_token)
+  到 _outlook_pool/ 和 emails.txt、失败自动重试下一个干净 IP。
 
 Reads HTTP_PROXY env for Clash routing (host:port form). Set
 SELF_REG_SCRIPT_PATH to override standalone script location.
@@ -174,9 +184,9 @@ def count_pool():
         return 0
 
 
-def append_to_emails_pool(email, password):
+def append_to_emails_pool(email, password, refresh_token=None, client_id=None):
     """把成功号桥接进 emails.txt 池，供账号注册侧 common/emails.next_email 消费。
-    token/client_id 用占位符 fresh —— 消费侧 Graph token 会失败并回退到 broker 浏览器取码。"""
+    有 refresh_token 就写真 token（消费侧纯 HTTP 取码）；没有则用占位符 fresh（回退 broker 浏览器取码）。"""
     try:
         existing = set()
         if os.path.isfile(EMAILS_POOL):
@@ -187,9 +197,11 @@ def append_to_emails_pool(email, password):
                         existing.add(line.split("----")[0].strip().lower())
         if email.lower() in existing:
             return
+        tok = refresh_token or "fresh"
+        cid = client_id or "fresh"
         with open(EMAILS_POOL, "a", encoding="utf-8") as f:
-            f.write(f"{email}----{password}----fresh----fresh\n")
-        log(f"emails.txt += {email}", "OK")
+            f.write(f"{email}----{password}----{tok}----{cid}\n")
+        log(f"emails.txt += {email} (token={'yes' if refresh_token else 'fresh'})", "OK")
     except Exception as e:
         log(f"append_to_emails_pool failed: {type(e).__name__}: {e}", "WARN")
 
@@ -249,11 +261,11 @@ async def one_attempt(mod, proxy_str, idx):
                 log(f"create_browser err (try {_r+1}/5): {m[:200]}", "WARN")
                 await asyncio.sleep(3 + _r)
         if not profile_id:
-            return None, None, []
+            return None, None, [], None
         info = bb.open_browser(profile_id)
         ws = info.get("ws", "")
         if not ws:
-            return None, None, []
+            return None, None, [], None
         from playwright.async_api import async_playwright as _apw
         async with _apw() as p:
             browser = await p.chromium.connect_over_cdp(ws)
@@ -275,7 +287,12 @@ async def one_attempt(mod, proxy_str, idx):
             except Exception:
                 pass
             page = await ctx.new_page()
-            email, password = await mod.register_outlook(page, ctx, idx)
+            # register_outlook 成功返回 3 元组 (email, password, graph)，失败返回 (None, None)。
+            # 必须按下标取，不能解包成 2（否则成功时 ValueError）。
+            result = await mod.register_outlook(page, ctx, idx)
+            email = result[0] if result else None
+            password = result[1] if result and len(result) > 1 else None
+            graph = result[2] if result and len(result) > 2 else None
             cookies = []
             if email:
                 try:
@@ -291,7 +308,7 @@ async def one_attempt(mod, proxy_str, idx):
                     ]
                 except Exception as e:
                     log(f"cookie export failed: {e}", "WARN")
-        return email, password, cookies
+        return email, password, cookies, graph
     finally:
         if profile_id:
             try:
@@ -371,27 +388,34 @@ def main():
         t0 = time.time()
         email = password = None
         cookies = []
+        graph = None
         try:
-            email, password, cookies = asyncio.run(
+            email, password, cookies, graph = asyncio.run(
                 asyncio.wait_for(one_attempt(mod, attempt_proxy, n), timeout=args.timeout)
             )
         except Exception as e:
             log(f"attempt raised {type(e).__name__}: {str(e)[:200]}", "WARN")
         elapsed = time.time() - t0
         if email and password:
+            refresh_token = (graph or {}).get("refresh_token")
+            client_id = (graph or {}).get("client_id")
             fname = write_record({
                 "email": email,
                 "password": password,
+                "refresh_token": refresh_token,
+                "client_id": client_id,
                 "outlook_cookies": cookies,
                 "source": "self-loop",
                 "ts": datetime.now().isoformat(),
             })
-            append_to_emails_pool(email, password)   # 桥接进账号注册池
+            append_to_emails_pool(email, password, refresh_token, client_id)   # 桥接进账号注册池
             succ += 1
-            log(f"OK in {elapsed:.1f}s: {email} -> {fname} (pool now {count_pool()})", "OK")
-        else:
-            failed += 1
-            log(f"FAIL in {elapsed:.1f}s (success rate {succ}/{n} = {100*succ/n:.0f}%)", "WARN")
+            log(f"OK in {elapsed:.1f}s: {email} (refresh_token={'yes' if refresh_token else 'no'}) "
+                f"-> {fname} (pool now {count_pool()})", "OK")
+            time.sleep(args.sleep)
+            continue
+        failed += 1
+        log(f"FAIL in {elapsed:.1f}s (success rate {succ}/{n} = {100*succ/n:.0f}%)", "WARN")
         time.sleep(args.sleep)
 
 
