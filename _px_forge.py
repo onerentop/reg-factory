@@ -31,11 +31,13 @@ def _golden_presshold_blob():
 
 
 def _forge_payload(golden_blob):
-    """黄金长按 payload：把内嵌 2 个时间戳刷新到当下，重编码。"""
+    """黄金长按 payload 刷新时间戳重编码。
+    注：实测 do:[] 的根因不是时间戳(原样重编码也 do:[])，而是 payload 绑定黄金挑战的
+    每挑战令牌(如 bff5b218，仅在长按 payload、不在指纹/body)→ 重放到新挑战令牌不匹配被拒。
+    要全 HTTP 伪造需从新挑战 iframe 提取该令牌并替换。"""
     dec, enc = Px2Decryptor(), Px2Encoder()
-    pt = dec.decrypt(golden_blob)  # bytes(JSON, 含二进制)
+    pt = dec.decrypt(golden_blob)
     now = int(time.time() * 1000)
-    # 黄金两个时间戳(按出现顺序)：t0(早) t1(晚, 差~2.5s)。刷新为 now-2500, now
     tss = sorted(set(re.findall(rb"17811\d{8}", pt)))
     if len(tss) >= 2:
         pt = pt.replace(tss[0], str(now - 2500).encode())
@@ -106,16 +108,18 @@ async def _run(proxy):
         page.on("response", on_resp)
 
         drive = asyncio.create_task(register_outlook(page, ctx, 0))
-        # 等挑战激活：出现带 sid 字段的 collector body
+        # 等指纹序列发完(seq>=2)，用最高seq的body——真实长按在seq=3,在seq=2伪造会被结构性拒(do:[])
         fresh = None
-        for _ in range(60):
+        for _ in range(80):
             await asyncio.sleep(2)
-            for b in reversed(bodies):
+            best = None
+            for b in bodies:
                 f = parse_collector_body(b).plaintext_fields
-                if f.get("sid") and f.get("cs"):
-                    fresh = (b, f)
-                    break
-            if fresh:
+                if f.get("sid") and f.get("cs") and f.get("seq", "").isdigit():
+                    if best is None or int(f["seq"]) > int(best[1]["seq"]):
+                        best = (b, f)
+            if best and int(best[1]["seq"]) >= 2:
+                fresh = best
                 break
         try:
             cookies = await ctx.cookies()
@@ -147,7 +151,8 @@ async def _run(proxy):
                 nf["rsc"] = str(int(f.get("rsc", "1")) + 1)
             except Exception:
                 pass
-            nf["pc"] = f.get("pc", str(int(time.time() * 1000))[-16:])
+            import random
+            nf["pc"] = "".join(str(random.randint(0, 9)) for _ in range(16))  # 全新 pc(每请求唯一)
             forged_body = "&".join(["payload=" + forged_payload] + [f"{k}={v}" for k, v in nf.items()])
             print(f"[forge] 提交伪造长按(浏览器仍存活) body len={len(forged_body)} seq={nf['seq']}")
             loop = asyncio.get_event_loop()
