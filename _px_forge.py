@@ -20,23 +20,29 @@ from perimeterx_solver.analysis.decryptor import Px2Decryptor, Px2Encoder
 URL = "https://collector-PXzC5j78di.hsprotect.net/api/v2/msft"
 
 
-def _golden_presshold_blob():
+def _golden_presshold():
+    """返回 (黄金长按解密明文bytes, 黄金p1=挑战session_id)。"""
     dec = Px2Decryptor()
     g = SampleCorpus().golden()
     for r in g.requests:
         cp = parse_collector_body(r.req_body)
         if cp.encrypted_blob and b"#px-captcha" in dec.decrypt(cp.encrypted_blob):
-            return cp.encrypted_blob
-    return None
+            return dec.decrypt(cp.encrypted_blob), cp.plaintext_fields.get("p1", "")
+    return None, None
 
 
-def _forge_payload(golden_blob):
-    """黄金长按 payload 刷新时间戳重编码。
-    注：实测 do:[] 的根因不是时间戳(原样重编码也 do:[])，而是 payload 绑定黄金挑战的
-    每挑战令牌(如 bff5b218，仅在长按 payload、不在指纹/body)→ 重放到新挑战令牌不匹配被拒。
-    要全 HTTP 伪造需从新挑战 iframe 提取该令牌并替换。"""
-    dec, enc = Px2Decryptor(), Px2Encoder()
-    pt = dec.decrypt(golden_blob)
+def _forge_payload(golden_pt, golden_p1, fresh_p1, fresh_sid_uuid=None):
+    """伪造长按 payload：把黄金 payload 里嵌的【挑战 session_id=p1】换成 fresh p1，刷新时间戳，重编码。
+    根因实测：payload 内嵌 iframe URL `...session_id=<p1>`，p1 不匹配 body 字段 → do:[]。"""
+    enc = Px2Encoder()
+    pt = golden_pt
+    # 替换 p1(挑战session_id)：取最长存在的前缀，等长替换
+    if golden_p1 and fresh_p1:
+        for L in range(len(golden_p1), 15, -1):
+            gp = golden_p1[:L].encode()
+            if gp in pt:
+                pt = pt.replace(gp, fresh_p1[:L].encode())
+                break
     now = int(time.time() * 1000)
     tss = sorted(set(re.findall(rb"17811\d{8}", pt)))
     if len(tss) >= 2:
@@ -143,8 +149,9 @@ async def _run(proxy):
                     pass
                 print(f"   seq={sq} do={do} ob={obd!r}")
 
-            golden = _golden_presshold_blob()
-            forged_payload = _forge_payload(golden)
+            golden_pt, golden_p1 = _golden_presshold()
+            forged_payload = _forge_payload(golden_pt, golden_p1, f.get("p1", ""))
+            print(f"[forge] p1替换: 黄金{golden_p1[:18]}.. → fresh{f.get('p1','')[:18]}..")
             nf = dict(f); nf.pop("payload", None)
             try:
                 nf["seq"] = str(int(f.get("seq", "0")) + 1)
