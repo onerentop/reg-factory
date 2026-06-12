@@ -17,10 +17,12 @@
 
 | 阶段 | 行范围 | 抽成 | 失败退出点(→`return False`) | 成功 |
 |---|---|---|---|---|
-| Step 1-5 表单 | ~700–1099（`# Step 1: Enter email` 起，至 `# Step 6` 前） | `_fill_signup_form(page, context, idx=0, tag="") -> bool` | 该段内所有 `return None, None` | 穿透到末尾 → `return True` |
+| Step 1-5 表单 | **行 700**（`email, password, prefix = generate_email_password()`）**–1099**（`# Step 6` 前） | `_fill_signup_form(page, context, idx=0, tag="") -> tuple[bool, str\|None, str\|None]` | 该段内所有 `return None, None` → `return False, None, None` | 穿透到末尾 → `return True, email, password` |
 | Step 6 验证码 | 1100–1471（`# Step 6: CAPTCHA handling` 起，至 `if not verify_registered_outlook` 前） | `_solve_signup_captcha(page, context, idx=0, tag="") -> bool` | 1174 / 1436 / 1441 / 1456 → `return False` | 验证码通过、循环自然退出 → `return True` |
 
-> 1473 `verify_registered_outlook` + 1480 `extract_graph_token` 在 captcha 之外，**留在 register_outlook**。`email`/`password` 是 Step1-5 设的局部变量，captcha 不产出它们。`max_press`/`human_press`/`_hp_announced` 等 Step6 局部状态随块一起搬进 `_solve_signup_captcha`（在函数内重新从 env 读取/初始化）。
+> 1473 `verify_registered_outlook` + 1480 `extract_graph_token` 在 captcha 之外，**留在 register_outlook**。
+>
+> **⚠️ 跨边界状态（实测，必须处理）**：`email`/`password` 在 **Step1-2（行 700/748/756）生成**，却在 register_outlook **尾部（1473 verify、1480 token、1485 return）使用**——跨 `_fill_signup_form` 边界。故该函数**必须返回 `(ok, email, password)`**（非仅 bool），register_outlook 接：`ok, email, password = await _fill_signup_form(...); if not ok: return None, None`，尾部再用 email/password。**这就是该抽取非"纯 cut-and-call"、盲做(无实跑)有风险的根因。** `max_press`/`human_press`/`_hp_announced` 等 Step6 局部状态随块搬进 `_solve_signup_captcha`（函数内重新从 env 读/初始化），captcha 不产出 email/password。
 
 ---
 
@@ -28,10 +30,11 @@
 
 **Files:** Modify `register_outlook_standalone.py`
 
-- [ ] **Step 1: 抽取**。把 `register_outlook` 内 Step 1-5 块（`# Step 1: Enter email` 至 `# Step 6` 前一行）整体移到一个新顶层函数 `async def _fill_signup_form(page, context, idx=0, tag=""):`，紧挨 `register_outlook` 定义之前。块内：① 所有 `return None, None` 改 `return False`；② 末尾追加 `return True`；③ 块首若引用 `tag = f"[#{idx}]"` 已由参数提供则删重复赋值（保留一处）。
-- [ ] **Step 2: 改 call site**。在 `register_outlook` 原 Step 1-5 位置替换为：
+- [ ] **Step 1: 抽取**。把 `register_outlook` 内 **行 700（`email, password, prefix = generate_email_password()`）至 `# Step 6` 前一行**整体移到新顶层函数 `async def _fill_signup_form(page, context, idx=0, tag=""):`，紧挨 `register_outlook` 定义之前。块内：① 所有 `return None, None` 改 `return False, None, None`；② 末尾追加 `return True, email, password`；③ `tag` 由参数提供则删块内重复赋值。
+- [ ] **Step 2: 改 call site**。在 `register_outlook` 原位置替换为（**接住 email/password，尾部仍要用**）：
 ```python
-        if not await _fill_signup_form(page, context, idx, tag):
+        ok, email, password = await _fill_signup_form(page, context, idx, tag)
+        if not ok:
             return None, None
 ```
 - [ ] **Step 3: 静态验证**：
