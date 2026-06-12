@@ -46,9 +46,21 @@ navigate(referer) → _warm_session → _fill_signup_form → _solve_signup_capt
 
 **`ProxyService` 延后**：worker 的代理由 `tasks.py` 经 context 注入（`ctx["proxy"]`），flow 不主动 acquire，故本里程碑不做 `StickyProxyService`（YAGNI）。
 
-`IxBrowserService.open(profile, proxy)` 返回 `BrowserSession(page, context, profile_id, proxy)`；`close(session)` 调 `browser_provider` 的 close/delete。
+`BrowserService` 接口改为 **`session(profile, proxy)` async 上下文管理器**（见 §3.5）：`async with browser.session(...) as sess:` 内 `sess` 含 `page/context/profile_id/proxy`，退出自动清理。`IxBrowserService.session` 直接 `yield from`/转接 `_open_ixbrowser_page`（它本就是 async CM），零重复。
 
-## 4. Flow 改原生步骤 + 依赖注入
+## 3.5 实施中发现的约束 → 范围拆分 M2a / M2b（2026-06-12）
+
+**发现**：`_open_ixbrowser_page` 是 **async 上下文管理器**——playwright 实例在 `async with` 块内存活、退出即销毁。所以"浏览器会话"必须**跨步骤存活在一个 `with` 作用域**内，与 §4 原设想的"provision_browser / teardown 是两个独立 Step"**不兼容**。`BrowserService` 接口需从 `open()/close()` 改为 **`session(profile, proxy)` async CM**，且 Outlook flow 的 `run()` 需覆写为"在 `async with browser.session()` 里跑步骤"。
+
+**叠加风险**：根抽取改动的是**在产的 `register_outlook`**（根 loop 出号靠它），而端到端只能靠干净 IP 实跑确认——当前 IP 烧了无法实跑。
+
+**据此拆分**：
+- **M2a（本轮执行，静态/单测可验、低风险）**：①根安全抽取 `_solve_perimeterx_hold`/`_fill_signup_form`/`_solve_signup_captcha`（纯重构，register_outlook 薄编排，逐行 diff 审查 + ast/import 烟测）；②能力适配器 `PerimeterXHoldSolver`(包 `_solve_perimeterx_hold`)、`GraphTokenExtractor`(包 `extract_graph_token`)、`IxBrowserService`(暴露 `session()` CM 包 `_open_ixbrowser_page`)；③`default_outlook_bundle()`；④全部 fake/monkeypatch 单测。**不改 worker flow**（仍 LegacyBridgeStep），故 worker 行为不变；根 loop 行为靠 diff 保真。
+- **M2b（gated，待干净 IP）**：Outlook flow 覆写 `run()` 用 `IxBrowserService.session()` CM 包步骤、改 native Step 调上述能力/抽取函数；拿到干净/移动 IP 后**实跑确认**根 loop 不退 + worker 原生路径出号。
+
+§4 描述的是 M2b 的目标终态；M2a 先把可验证的地基（抽取+能力）做扎实。
+
+## 4. Flow 改原生步骤 + 依赖注入（M2b 目标终态）
 
 `flows/outlook.py` 改为 native Step（`kind="native"`），用注入的 `ServiceBundle`：
 
