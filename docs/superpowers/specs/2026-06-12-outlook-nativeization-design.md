@@ -54,11 +54,13 @@ navigate(referer) → _warm_session → _fill_signup_form → _solve_signup_capt
 
 **叠加风险**：根抽取改动的是**在产的 `register_outlook`**（根 loop 出号靠它），而端到端只能靠干净 IP 实跑确认——当前 IP 烧了无法实跑。
 
-**据此拆分**：
-- **M2a（本轮执行，静态/单测可验、低风险）**：①根安全抽取 `_solve_perimeterx_hold`/`_fill_signup_form`/`_solve_signup_captcha`（纯重构，register_outlook 薄编排，逐行 diff 审查 + ast/import 烟测）；②能力适配器 `PerimeterXHoldSolver`(包 `_solve_perimeterx_hold`)、`GraphTokenExtractor`(包 `extract_graph_token`)、`IxBrowserService`(暴露 `session()` CM 包 `_open_ixbrowser_page`)；③`default_outlook_bundle()`；④全部 fake/monkeypatch 单测。**不改 worker flow**（仍 LegacyBridgeStep），故 worker 行为不变；根 loop 行为靠 diff 保真。
-- **M2b（gated，待干净 IP）**：Outlook flow 覆写 `run()` 用 `IxBrowserService.session()` CM 包步骤、改 native Step 调上述能力/抽取函数；拿到干净/移动 IP 后**实跑确认**根 loop 不退 + worker 原生路径出号。
+**第二个发现（抽取可行性）**：press-and-hold/验证码逻辑**不是干净的可 cut-and-call 块**——它是 Step 6 一个**轮询 `while` 循环**里的迭代逻辑，深度交织循环状态（`press_count`/`no_btn_rounds`/顶部成功检测/多处 `continue`）。抽 `_solve_perimeterx_hold`/`_solve_signup_captcha` 实为抽出整个 ~380 行轮询循环 + 其状态——是对**在产 register_outlook** 的大型 delicate 重构，且烧了 IP 无法实跑验证。故**根抽取整体下放 M2b**（实跑能验证时再做）。
 
-§4 描述的是 M2b 的目标终态；M2a 先把可验证的地基（抽取+能力）做扎实。
+**据此拆分（已据上述两个发现定稿）**：
+- **M2a（✅ 已完成，零根改动、纯新增、单测可验）**：能力适配器 `GraphTokenExtractor`(包 `extract_graph_token`)、`IxBrowserService`(`session()` CM 包 `_open_ixbrowser_page`，`BrowserService` ABC 改 CM)、`default_outlook_bundle()`(装配 browser+tokens)；全部 monkeypatch 单测；**不碰 register_outlook、不改 worker flow**，worker/根 loop 行为均不变。
+- **M2b（gated，待干净/移动 IP）**：①根安全抽取 `_solve_perimeterx_hold`/`_fill_signup_form`/`_solve_signup_captcha`（抽出 Step 6 轮询循环 + Step1-5，register_outlook 薄编排，逐行 diff 审查）；②`PerimeterXHoldSolver` 能力（包 `_solve_perimeterx_hold`）接进 bundle 的 `CaptchaResolver`；③Outlook flow 覆写 `run()` 用 `IxBrowserService.session()` CM 包 native Step；④拿到干净 IP **实跑确认**根 loop 不退 + worker 原生路径出号。
+
+§2、§3(PerimeterXHoldSolver)、§4 描述的是 M2b 的目标终态；M2a 已把零风险的能力地基做扎实。
 
 ## 4. Flow 改原生步骤 + 依赖注入（M2b 目标终态）
 
