@@ -1,17 +1,32 @@
 """registration 路由行为测试。
 
 routes:
-  POST /register/outlook  → worker.process_manager.task_manager.submit(idx, proxy, config)
-                            + worker.process_manager._fetch_proxy_from_manager()
+  POST /register/outlook  → gateway.routers.registration._pick_active_proxy(session)
+                            (直接查 gateway.db，不 HTTP 自调用)
+                            + worker.process_manager.task_manager.submit(idx, proxy, config)
+                            + worker.tasks._helpers.rotate_proxy_sid(每窗口轮换 sid)
                             + gateway.registration_helpers.resolve_registration_mode()
   GET  /tasks/{task_id}  → worker.process_manager.task_manager.get_status(task_id)
 
-process_manager 中的 task_manager 是模块级单例；路由在函数体内懒导入，
-所以 patch 目标是 worker.process_manager.task_manager（单例方法）
-以及 worker.process_manager._fetch_proxy_from_manager（函数）。
+端点新增 session 依赖(get_session)；测试 override 为 None(取 proxy 经 mock 的
+_pick_active_proxy，不碰真 DB)。task_manager 是模块级单例，懒导入，patch
+worker.process_manager.task_manager。
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
+from gateway.main import app
+from gateway.deps import get_session
+
+
+@pytest.fixture(autouse=True)
+def _no_session():
+    # 端点签名有 session=Depends(get_session)；测试不碰真 DB(proxy 经 mock 取)
+    app.dependency_overrides[get_session] = lambda: None
+    yield
+    app.dependency_overrides.pop(get_session, None)
 
 
 # ──────────────────────────────────────────────
@@ -19,9 +34,9 @@ from unittest.mock import MagicMock, patch
 # ──────────────────────────────────────────────
 
 def test_register_outlook_happy_single(client):
-    """count=1，无 proxy → _fetch_proxy_from_manager → submit → task_ids 长度 1。"""
-    with patch("worker.process_manager.task_manager") as mock_tm, \
-         patch("worker.process_manager._fetch_proxy_from_manager", return_value="socks5://1.2.3.4:1080"):
+    """count=1，无 proxy → _pick_active_proxy → submit → task_ids 长度 1。"""
+    with patch("gateway.routers.registration._pick_active_proxy", new_callable=AsyncMock, return_value="socks5://1.2.3.4:1080"), \
+         patch("worker.process_manager.task_manager") as mock_tm:
         mock_tm.submit.return_value = "tid-001"
 
         r = client.post("/register/outlook", json={"count": 1, "config": {"headless": True}})
@@ -45,8 +60,8 @@ def test_register_outlook_happy_multi(client):
         call_count += 1
         return tid
 
-    with patch("worker.process_manager.task_manager") as mock_tm, \
-         patch("worker.process_manager._fetch_proxy_from_manager", return_value=""):
+    with patch("gateway.routers.registration._pick_active_proxy", new_callable=AsyncMock, return_value=""), \
+         patch("worker.process_manager.task_manager") as mock_tm:
         mock_tm.submit.side_effect = fake_submit
 
         r = client.post("/register/outlook", json={"count": 3})
@@ -58,9 +73,9 @@ def test_register_outlook_happy_multi(client):
 
 
 def test_register_outlook_uses_provided_proxy(client):
-    """body 中已提供 proxy → 不调用 _fetch_proxy_from_manager。"""
-    with patch("worker.process_manager.task_manager") as mock_tm, \
-         patch("worker.process_manager._fetch_proxy_from_manager") as mock_fetch:
+    """body 中已提供 proxy → 不调用 _pick_active_proxy。"""
+    with patch("gateway.routers.registration._pick_active_proxy", new_callable=AsyncMock) as mock_pick, \
+         patch("worker.process_manager.task_manager") as mock_tm:
         mock_tm.submit.return_value = "tid-proxy"
 
         r = client.post(
@@ -69,8 +84,8 @@ def test_register_outlook_uses_provided_proxy(client):
         )
 
     assert r.status_code == 200
-    mock_fetch.assert_not_called()
-    # submit 被调用时 proxy 应该是传入的那个
+    mock_pick.assert_not_called()
+    # submit 被调用时 proxy 应是传入的那个(不含 -sid- → rotate 原样返回)
     call_kwargs = mock_tm.submit.call_args[1]
     assert call_kwargs.get("proxy") == "socks5://user:pw@9.9.9.9:1080"
 
@@ -87,8 +102,8 @@ def test_register_outlook_rotates_sid_per_window(client):
         return f"tid-{len(proxies_used)}"
 
     base = "socks5://sb7f3017-region-Rand-sid-ORIG1234-t-5:pw@us.1024proxy.io:3000"
-    with patch("worker.process_manager.task_manager") as mock_tm, \
-         patch("worker.process_manager._fetch_proxy_from_manager", return_value=base):
+    with patch("gateway.routers.registration._pick_active_proxy", new_callable=AsyncMock, return_value=base), \
+         patch("worker.process_manager.task_manager") as mock_tm:
         mock_tm.submit.side_effect = fake_submit
         r = client.post("/register/outlook", json={"count": 2})
 
@@ -102,8 +117,8 @@ def test_register_outlook_rotates_sid_per_window(client):
 
 def test_register_outlook_mode_from_body(client):
     """body.mode 优先级最高，config 中传入的 mode 会被覆盖。"""
-    with patch("worker.process_manager.task_manager") as mock_tm, \
-         patch("worker.process_manager._fetch_proxy_from_manager", return_value=""):
+    with patch("gateway.routers.registration._pick_active_proxy", new_callable=AsyncMock, return_value=""), \
+         patch("worker.process_manager.task_manager") as mock_tm:
         mock_tm.submit.return_value = "tid-mode"
 
         r = client.post(
@@ -113,14 +128,13 @@ def test_register_outlook_mode_from_body(client):
 
     assert r.status_code == 200
     call_kwargs = mock_tm.submit.call_args[1]
-    # config["mode"] 应由 resolve_registration_mode 决定，应为 "hybrid"
     assert call_kwargs.get("config", {}).get("mode") == "hybrid"
 
 
 def test_register_outlook_default_mode_browser(client):
     """不传 mode → 默认 'browser'。"""
-    with patch("worker.process_manager.task_manager") as mock_tm, \
-         patch("worker.process_manager._fetch_proxy_from_manager", return_value=""):
+    with patch("gateway.routers.registration._pick_active_proxy", new_callable=AsyncMock, return_value=""), \
+         patch("worker.process_manager.task_manager") as mock_tm:
         mock_tm.submit.return_value = "tid-default-mode"
 
         r = client.post("/register/outlook", json={})
@@ -132,8 +146,8 @@ def test_register_outlook_default_mode_browser(client):
 
 def test_register_outlook_empty_body(client):
     """空 body（合法 JSON）也应成功——路由有默认值。"""
-    with patch("worker.process_manager.task_manager") as mock_tm, \
-         patch("worker.process_manager._fetch_proxy_from_manager", return_value=""):
+    with patch("gateway.routers.registration._pick_active_proxy", new_callable=AsyncMock, return_value=""), \
+         patch("worker.process_manager.task_manager") as mock_tm:
         mock_tm.submit.return_value = "tid-empty"
         r = client.post("/register/outlook", json={})
 

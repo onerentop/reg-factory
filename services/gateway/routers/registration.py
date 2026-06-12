@@ -1,14 +1,34 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.base_schema import ApiResponse
+from gateway.deps import get_session
 
 router = APIRouter()
 
 
+async def _pick_active_proxy(session: AsyncSession) -> str:
+    """直接查 gateway.db 取一个 active 代理串。
+    注册端点是 async + gateway 单 worker，绝不能用同步 requests 自调用
+    /proxy(会阻塞事件循环 → 自调用排不进去超时 → proxy 空 → 注册直连)，
+    故直接查库，零 HTTP 自调用。"""
+    import random
+    from sqlalchemy import select
+    from gateway.models import ProxyEntry
+    result = await session.execute(select(ProxyEntry))
+    avail = [p for p in result.scalars().all() if p.status in ("active", "available")]
+    if not avail:
+        return ""
+    p = random.choice(avail)
+    auth = f"{p.username}:{p.password}@" if p.username and p.password else ""
+    return f"{p.type or 'socks5'}://{auth}{p.host}:{p.port}"
+
+
 @router.post("/register/outlook", response_model=ApiResponse)
-async def trigger_outlook_registration(body: dict = {}):
+async def trigger_outlook_registration(body: dict = {}, session: AsyncSession = Depends(get_session)):
     """从前端触发 Outlook 注册。用 multiprocessing 真并发。"""
-    from worker.process_manager import task_manager, _fetch_proxy_from_manager
+    from worker.process_manager import task_manager
     from worker.tasks._helpers import rotate_proxy_sid
     count = body.get("count", 1)
     proxy = body.get("proxy", "")
@@ -17,7 +37,7 @@ async def trigger_outlook_registration(body: dict = {}):
     from gateway.registration_helpers import resolve_registration_mode
     config["mode"] = resolve_registration_mode(body)
     if not proxy:
-        proxy = _fetch_proxy_from_manager()
+        proxy = await _pick_active_proxy(session)
     task_ids = []
     for i in range(count):
         # 每个并发窗口轮换 sid → 不同出口 IP，避免 PerimeterX 因同 IP 关联多账号
