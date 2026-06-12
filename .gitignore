@@ -85,3 +85,4 @@ proxypin_*
 *.err
 *.tsbuildinfo
 %USERPROFILE%/
+.pytest_cache/
