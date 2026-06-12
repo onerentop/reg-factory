@@ -25,10 +25,11 @@ class EmailAccount:
 
 
 class BrowserService(ABC):
+    """浏览器会话能力。session() 是 async 上下文管理器——会话在 with 块内存活，退出自动清理。"""
     @abstractmethod
-    async def open(self, *, profile: str, proxy: str) -> BrowserSession: ...
-    @abstractmethod
-    async def close(self, session: BrowserSession) -> None: ...
+    def session(self, *, proxy: str, idx: int = 0):
+        """返回 async 上下文管理器，yield 一个 BrowserSession。"""
+        ...
 
 
 class ProxyService(ABC):
