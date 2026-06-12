@@ -934,20 +934,23 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False):
                     if is_month and not month_filled:
                         await combo.click(force=True)
                         await asyncio.sleep(1)
-                        # Try month option (Chinese → English → French → number)
-                        month_opt = page.locator(f'[role="option"]:has-text("{month_names_cn[month]}")').first
-                        if await month_opt.count() == 0:
-                            month_opt = page.locator(f'[role="option"]:has-text("{month_names_en[month]}")').first
-                        if await month_opt.count() == 0:
-                            month_opt = page.locator(f'[role="option"]:has-text("{month_names_fr[month]}")').first
-                        if await month_opt.count() == 0:
-                            month_opt = page.locator(f'[role="option"]:has-text("{month_names_de[month]}")').first
-                        if await month_opt.count() == 0:
-                            month_opt = page.locator(f'[role="option"]:has-text("{month}")').first
-                        if await month_opt.count() > 0:
-                            await month_opt.click()
+                        # 按位置选第 month 个月选项(语言无关)：Outlook 界面随出口 IP
+                        # 国家本地化(葡/德/法/西…)，硬编码月名列表不可持续。过滤掉占位项
+                        # 后，剩下的选项即 1..12 月，顺序固定，选第 month 个。
+                        opts = page.locator('[role="option"]')
+                        n_opt = await _safe_count(opts)
+                        ph_words = ["month", "月", "mois", "mês", "mes", "monat"]
+                        real = []
+                        for oi in range(n_opt):
+                            t = (await opts.nth(oi).text_content() or "").strip()
+                            tl = t.lower()
+                            if not t or any(w in tl for w in ph_words):
+                                continue
+                            real.append(oi)
+                        if len(real) >= month:
+                            await opts.nth(real[month - 1]).click()
                             month_filled = True
-                            print(f"  {tag} month: {month}")
+                            print(f"  {tag} month: {month} (by position, {len(real)} months)")
                         else:
                             await page.keyboard.type(str(month))
                             await asyncio.sleep(0.3)
