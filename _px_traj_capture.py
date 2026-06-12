@@ -10,7 +10,9 @@ if sys.platform == "win32":
 os.environ.setdefault("OUTLOOK_HUMAN_PRESS", "1")
 os.environ.setdefault("OUTLOOK_HUMAN_WAIT_ROUNDS", "90")
 import config  # noqa
-from common.stealth_playwright import async_playwright   # rebrowser 隐身：真人过码所需
+# 原版 playwright：rebrowser 隔离世界会让 iframe 内监听器收不到指针(黄金 pointer=0 真因)。
+# 捕获优先用原版(监听器在主世界生效)；代价是无隐身→必须配全新干净 IP+真人手动过码。
+from playwright.async_api import async_playwright
 from common.browser_provider import get_browser_provider
 from register_outlook_standalone import register_outlook
 from perimeterx_solver.classify import is_px_url, classify_px_url, PxKind, parse_collector_body
