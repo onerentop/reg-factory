@@ -37,7 +37,7 @@ export default function LogsPage() {
     if (service) params.set('service', service)
     if (level) params.set('level', level)
     if (keyword) params.set('keyword', keyword)
-    fetch(`/api/audit?${params}`)
+    fetch(`/api/logs?${params}`)
       .then(r => r.json())
       .then(res => {
         const data = res.data || {}

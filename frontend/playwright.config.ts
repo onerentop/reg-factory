@@ -6,6 +6,7 @@ export default defineConfig({
   testDir: './e2e',
   timeout: 30000,
   fullyParallel: false,
+  workers: 1, // walkthrough 真操作共享后端状态(建/删账号·代理·规则)，须顺序跑避免争用
   use: {
     baseURL: 'http://localhost:3000',
     headless: true,

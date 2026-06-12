@@ -25,22 +25,33 @@ function RulesTab() {
   const [addVisible, setAddVisible] = useState(false)
   const [form] = Form.useForm()
 
-  useEffect(() => {
+  const fetchRules = () => {
     fetch('/api/alerts/rules').then(r => r.json())
       .then(res => setRules(res.data || []))
       .catch(() => {})
-  }, [])
+  }
+
+  useEffect(() => { fetchRules() }, [])
 
   const addRule = async () => {
     const values = await form.validateFields()
-    await fetch('/api/alerts/rules', {
+    const resp = await fetch('/api/alerts/rules', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${localStorage.getItem('token')}`,
+      },
       body: JSON.stringify(values),
     })
+    const data = await resp.json().catch(() => ({}))
+    if (!resp.ok || data.success === false) {
+      message.error(data.detail || data.message || '规则添加失败')
+      return
+    }
     message.success('规则已添加')
     setAddVisible(false)
     form.resetFields()
+    fetchRules()  // 刷新列表，新规则即时显示
   }
 
   const columns = [

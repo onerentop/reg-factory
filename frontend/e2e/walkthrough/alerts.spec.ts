@@ -4,16 +4,10 @@ import { login } from '../_helpers'
 /**
  * Alerts Walkthrough: 真实 UI 走查
  *
- * 技术现状说明（真实，非虚构）：
- * 1. AlertsPage.tsx 的 addRule() 使用原生 fetch 没有 Authorization 请求头
- *    → 后端返回 "Missing token" → 模态框仍关闭（addRule 无 error 检查）→ 不持久化
- * 2. 后端仅有 GET/POST /alerts/rules，没有 DELETE 端点
- *    → UI 中也没有删除规则的按钮
- *
- * 因此本 walkthrough:
- *   Test 1: 页面加载 + 模态框 UI 走查（填表提交、模态框关闭）
- *   Test 2: 用 page.evaluate 附加 token 发起真实 POST，刷新页面验证持久化
- *           （无 DELETE 端点，不做清理）
+ * 说明：addRule 的"无 Auth 头 → 静默不持久化"bug 已修复(带 Auth 头 + 检查响应)。
+ * Test 1: 经 UI 真创建规则 → 模态框关闭 → 规则真出现在列表(真链路持久化)。
+ * Test 2: 用 page.evaluate 直调真实 API 复核持久化。
+ * (后端无 DELETE /alerts/rules/:id，留测试数据 e2e-*rule-* 命名,易手动清理)
  */
 test.describe('告警页面 walkthrough', () => {
   test('告警规则: 页面加载 + 模态框 UI 交互', async ({ page }) => {
@@ -53,10 +47,10 @@ test.describe('告警页面 walkthrough', () => {
     // 提交（antd 2-char 按钮 "确 定"）
     await modal.getByRole('button', { name: /确\s*定/ }).click()
 
-    // 模态框关闭 = UI 层提交操作执行完毕
-    // （注：addRule 内原生 fetch 无 Auth header，后端返回 "Missing token"，
-    //   数据不持久化 —— 这是 AlertsPage 的已知 bug，但 UI 流程完整走通）
+    // 模态框关闭 + 规则真实持久化（addRule 已修复：带 Auth 头 + 检查响应，失败不再假成功）
     await expect(modal).not.toBeVisible({ timeout: 10000 })
+    // 真链路持久化验证：经 UI 创建的规则真出现在列表
+    await expect(page.getByText(ruleName)).toBeVisible({ timeout: 10000 })
   })
 
   test('告警规则: 真实 API 创建 → 刷新页面验证持久化', async ({ page }) => {
