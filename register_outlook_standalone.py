@@ -620,6 +620,15 @@ async def _warm_session(page, idx, tag):
         print(f"  {tag} warm-up skipped: {str(e)[:80]}")
 
 
+async def _safe_count(locator):
+    """locator.count() 容错：页面导航时 execution context 可能被销毁，
+    视为 0 让上层循环重试/跳过，避免一次导航竞争就让整个注册崩溃。"""
+    try:
+        return await locator.count()
+    except Exception:
+        return 0
+
+
 async def register_outlook(page, context, idx=0, captcha_early_abort=False):
     """
     Register a new Outlook email account.
@@ -1021,7 +1030,7 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False):
             'input[id*="displayName"], input[id*="gamertag"], input[name*="displayName"], '
             'input[placeholder*="name"], input[type="text"]'
         ).first
-        if await username_input.count() > 0:
+        if await _safe_count(username_input) > 0:
             page_text = await page.evaluate("() => document.body.innerText")
             if any(kw in page_text.lower() for kw in ["name", "gamertag", "nom", "pseudo", "surnom"]) or \
                any(kw in page_text for kw in ["用户名", "游戏标签", "显示名称"]):
@@ -1033,7 +1042,7 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False):
                             'button:has-text("下一步")', 'button:has-text("Next")',
                             'button:has-text("Suivant")']:
                     btn = page.locator(sel).first
-                    if await btn.count() > 0:
+                    if await _safe_count(btn) > 0:
                         await btn.click(timeout=3000)
                         break
                 await asyncio.sleep(3)
@@ -1055,28 +1064,28 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False):
                 'input[placeholder*="last" i], input[aria-label*="姓" i], input[placeholder*="姓" i], '
                 'input[aria-label*="nom de famille" i], input[placeholder*="nom de famille" i]'
             ).first
-            if await fname_input.count() > 0 or await lname_input.count() > 0:
+            if await _safe_count(fname_input) > 0 or await _safe_count(lname_input) > 0:
                 break
             all_text_inputs = page.locator('input[type="text"]')
-            if await all_text_inputs.count() >= 2:
+            if await _safe_count(all_text_inputs) >= 2:
                 break
             await asyncio.sleep(1)
 
-        if await fname_input.count() > 0:
-            if await lname_input.count() > 0:
+        if await _safe_count(fname_input) > 0:
+            if await _safe_count(lname_input) > 0:
                 await lname_input.fill(last_name)
             await fname_input.fill(first_name)
             print(f"  {tag} name: {first_name} {last_name}")
         else:
             all_text_inputs = page.locator('input[type="text"]')
-            count = await all_text_inputs.count()
+            count = await _safe_count(all_text_inputs)
             if count >= 2:
                 await all_text_inputs.nth(0).fill(last_name)
                 await all_text_inputs.nth(1).fill(first_name)
                 print(f"  {tag} name (generic): {first_name} {last_name}")
 
         checkbox = page.locator('input[type="checkbox"], [role="checkbox"]').first
-        if await checkbox.count() > 0:
+        if await _safe_count(checkbox) > 0:
             try:
                 checked = await checkbox.is_checked()
             except Exception:
@@ -1090,7 +1099,7 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False):
                     'button[id="iSignupAction"]', 'button:has-text("Next")',
                     'button:has-text("下一步")', 'button:has-text("Suivant")']:
             btn = page.locator(sel).first
-            if await btn.count() > 0:
+            if await _safe_count(btn) > 0:
                 await btn.click(timeout=3000)
                 print(f"  {tag} clicked next (name): {sel}")
                 break
