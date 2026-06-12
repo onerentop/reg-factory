@@ -67,6 +67,14 @@ async def list_configs(
     return ApiResponse(data=[item.model_dump() for item in items])
 
 
+# 注意：/history 必须注册在 /{key:path} 之前——否则贪婪 path 会把 "key/history" 整体当 key，
+# 导致 /history 端点不可达（路由遮蔽）。FastAPI 按注册顺序匹配，具体路由先注册。
+@app.get("/config/{key:path}/history", response_model=ApiResponse)
+async def get_history(key: str, service: ConfigService = Depends(get_service)):
+    versions = await service.get_history(key)
+    return ApiResponse(data=[v.model_dump() for v in versions])
+
+
 @app.get("/config/{key:path}", response_model=ApiResponse)
 async def get_config(key: str, service: ConfigService = Depends(get_service)):
     entry = await service.get(key)
@@ -89,12 +97,6 @@ async def delete_config(key: str, service: ConfigService = Depends(get_service))
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Config '{key}' not found")
     return ApiResponse(message="Deleted")
-
-
-@app.get("/config/{key:path}/history", response_model=ApiResponse)
-async def get_history(key: str, service: ConfigService = Depends(get_service)):
-    versions = await service.get_history(key)
-    return ApiResponse(data=[v.model_dump() for v in versions])
 
 
 @app.post("/config/{key:path}/rollback/{version_id}", response_model=ApiResponse)

@@ -76,18 +76,16 @@ def test_delete_config_not_found(client):
 
 
 # ── GET /config/{key}/history ─────────────────────────────────────────────────
-# NOTE: /config/{key:path}/history is shadowed by /config/{key:path} (greedy path param).
-# Requesting GET /config/app.name/history is captured by the GET /config/{key:path}
-# route with key="app.name/history", which returns 404 because fake.get() returns None
-# for that key. This tests the actual routing behavior of the deployed app.
+# 回归测试：/history 曾被贪婪的 GET /config/{key:path} 遮蔽(不可达,返回 404)。
+# 修复方式=把 /history 路由注册在 /{key:path} 之前。此测试守护它保持可达。
 
-def test_get_history_route_shadowed(client):
-    """GET /config/{key:path}/history is shadowed by the greedy GET /config/{key:path}.
-    The real key received is 'app.name/history' which is not found → 404.
-    This is a known routing quirk of the config_service path design."""
+def test_get_history_reachable(client):
+    """GET /config/{key:path}/history 可达(修复路由遮蔽后)，返回该 key 的版本历史。"""
     r = client.get("/config/app.name/history")
-    # Key "app.name/history" not in fake → 404 from GET /config/{key:path}
-    assert r.status_code == 404
+    assert r.status_code == 200
+    data = r.json()["data"]
+    assert isinstance(data, list) and len(data) == 2
+    assert data[0]["config_key"] == "app.name"
 
 
 # ── POST /config/{key}/rollback/{version_id} ─────────────────────────────────
