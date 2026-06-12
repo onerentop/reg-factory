@@ -1915,7 +1915,6 @@ async def _register_one_headless(idx, proxy_str):
 # ======================== Browser Mode (ixBrowser, full GUI) ========================
 
 
-@asynccontextmanager
 def _rotate_sid(proxy_str):
     """轮换 1024proxy username 的 sid → 新出口 IP(代理失效时换会话)。非该格式原样返回。"""
     import re as _re, random as _rnd, string as _str
@@ -1925,6 +1924,7 @@ def _rotate_sid(proxy_str):
     return _re.sub(r"(-sid-)[A-Za-z0-9]+", r"\g<1>" + _new, proxy_str, count=1)
 
 
+@asynccontextmanager
 async def _open_ixbrowser_page(bb, idx, proxy_str):
     """创建并连接一个 ixBrowser 页面，yield (page, context, profile_id)，退出时清理。
 
