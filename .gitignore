@@ -58,3 +58,30 @@ _px_golden_decoded.json
 _px_cs.json
 _px_fail_press.json
 _px_trajectory.json
+
+# ===== 根目录散落的实验脚本/抓包dump/截图（本地调试用，不进库）=====
+/*.png
+/_*.json
+/_*.txt
+/_*.js
+/_*.py
+!/_clash_verge.py
+/_boqurl.txt
+/google_signup_cdp.json
+/accounts_gmail.txt
+/_funcaptcha_solver/
+# 工具/IDE 目录
+.spec-workflow/
+.superpowers/
+.vscode/
+node_modules/
+# 本地数据库
+*.db
+services/screenshots_outlook/*
+!services/screenshots_outlook/.gitkeep
+*.flow
+*.har
+proxypin_*
+*.err
+*.tsbuildinfo
+%USERPROFILE%/
