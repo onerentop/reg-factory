@@ -87,3 +87,4 @@ proxypin_*
 %USERPROFILE%/
 .pytest_cache/
 services/scripts/_sweep_report.json
+frontend/coverage/
