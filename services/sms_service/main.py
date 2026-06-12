@@ -15,7 +15,9 @@ db = DatabaseManager(
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    _ = db.engine
+    from shared.base_model import BaseModel
+    async with db.engine.begin() as conn:
+        await conn.run_sync(BaseModel.metadata.create_all)
     logger = setup_logger("sms_service")
     logger.info("SMS Service starting")
     yield

@@ -16,8 +16,18 @@ async def lifespan(app: FastAPI):
     _ = db.engine
     from shared.base_model import BaseModel
     from gateway.models import User, ApiKey, AuditLog, AlertRule, AlertHistory, ProxyEntry
+    from shared.log_models import LogEntry  # noqa: F401  —— /logs 查询需 log_entries 表
     async with db.engine.begin() as conn:
         await conn.run_sync(BaseModel.metadata.create_all)
+    # 种子 admin 用户(若不存在)，让鉴权保护端点可用
+    from gateway.repository import UserRepository, ApiKeyRepository
+    from gateway.auth_service import AuthService
+    from gateway.deps import jwt_strategy
+    async with db.get_session() as session:
+        if not await UserRepository(session).get_by_username("admin"):
+            await AuthService(UserRepository(session), ApiKeyRepository(session), jwt_strategy).create_user(
+                os.getenv("SEED_ADMIN_USER", "admin"),
+                os.getenv("SEED_ADMIN_PASSWORD", "admin123"), "admin")
     from shared.config_client import ConfigClient
     config_client = ConfigClient(config_service_url=os.getenv("CONFIG_SERVICE_URL", "http://localhost:8003"))
     await config_client.load_from_service()

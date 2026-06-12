@@ -113,8 +113,8 @@ class Sweep:
     def sweep_alerts(self):
         self.call("alerts", "list_rules", "GET", GATEWAY, "/alerts/rules")
         self.call("alerts", "create_rule", "POST", GATEWAY, "/alerts/rules", auth=True,
-                  json_body={"name": "_sweep_rule", "metric": "fail_rate", "threshold": 0.5, "window": 300},
-                  ok=range(200, 300), gated_on=(401, 403, 422))
+                  json_body={"name": "_sweep_rule", "rule_type": "fail_rate", "threshold": "0.5"},
+                  ok=range(200, 300), gated_on=(401, 403))
 
     def sweep_proxy(self):
         r = self.call("proxy", "create_proxy", "POST", GATEWAY, "/proxy",
