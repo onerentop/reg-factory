@@ -10,6 +10,7 @@ import {
   BellOutlined,
   AuditOutlined,
   ClockCircleOutlined,
+  ToolOutlined,
 } from '@ant-design/icons'
 import { Tooltip } from 'antd'
 import styles from './MainLayout.module.css'
@@ -24,6 +25,7 @@ const navItems = [
   { key: '/alerts', icon: <BellOutlined />, label: '告警' },
   { key: '/audit', icon: <AuditOutlined />, label: '审计' },
   { key: '/schedules', icon: <ClockCircleOutlined />, label: '定时任务' },
+  { key: '/tools', icon: <ToolOutlined />, label: '工具/运维' },
   { key: '/settings', icon: <SettingOutlined />, label: '设置' },
 ]
 

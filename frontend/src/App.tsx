@@ -11,6 +11,7 @@ import AlertsPage from './pages/AlertsPage'
 import AuditPage from './pages/AuditPage'
 import SchedulesPage from './pages/SchedulesPage'
 import ImportPage from './pages/ImportPage'
+import ToolsPage from './pages/ToolsPage'
 
 export default function App() {
   return (
@@ -28,6 +29,7 @@ export default function App() {
         <Route path="/audit" element={<AuditPage />} />
         <Route path="/schedules" element={<SchedulesPage />} />
         <Route path="/import" element={<ImportPage />} />
+        <Route path="/tools" element={<ToolsPage />} />
       </Route>
     </Routes>
   )
