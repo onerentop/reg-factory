@@ -254,3 +254,20 @@ def test_query_params_forwarded(client):
     params = call_kwargs.get("params", {})
     assert params.get("page") == "2"
     assert params.get("limit") == "10"
+
+
+def test_proxy_request_disables_env_proxy(client):
+    """回归(2026-06-13)：转发 httpx client 必须 trust_env=False。
+    否则 os.environ 的 HTTP_PROXY(extract-graph-token 等会设)会让转发到内部
+    微服务(localhost)误走代理 → 代理回不到 localhost → 畸形/空响应 → 500。"""
+    mock_ctx, _ = _make_httpx_mock(json_data={"ok": True})
+    captured = {}
+
+    def factory(*args, **kwargs):
+        captured.update(kwargs)
+        return mock_ctx
+
+    with patch("gateway.routers.forwarding._httpx.AsyncClient", side_effect=factory):
+        client.get("/accounts")
+
+    assert captured.get("trust_env") is False

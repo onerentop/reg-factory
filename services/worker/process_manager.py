@@ -19,7 +19,8 @@ def _fetch_proxy_from_manager() -> str:
     import random
     try:
         import requests as _req
-        resp = _req.get("http://localhost:8000/proxy", timeout=5)
+        # proxies 显式禁用：取内部 /proxy 不受 os.environ 代理污染(否则失败→无代理注册)
+        resp = _req.get("http://localhost:8000/proxy", timeout=5, proxies={"http": None, "https": None})
         proxy_list = resp.json().get("data", [])
         available = [p for p in proxy_list if p.get("status") in ("active", "available")]
         if available:

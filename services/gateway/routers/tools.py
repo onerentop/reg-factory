@@ -53,31 +53,44 @@ async def extract_graph_token_api(body: dict):
     except Exception:
         pass
 
-    if not os.environ.get("HTTPS_PROXY"):
-        proxy_for_token = ""
-        try:
-            async with _httpx.AsyncClient(timeout=5) as _pc:
-                _pr = await _pc.get("http://localhost:8000/proxy")
-                _pl = _pr.json().get("data", [])
-                _active = [p for p in _pl if p.get("status") in ("active", "available")]
-                if _active:
-                    _s = _active[0]
-                    _u = _s.get("username", "")
-                    _pw = _s.get("password", "")
-                    _auth = f"{_u}:{_pw}@" if _u and _pw else ""
-                    proxy_for_token = f"{_s.get('type','socks5')}://{_auth}{_s['host']}:{_s['port']}"
-        except Exception:
-            pass
-        if proxy_for_token:
-            os.environ["HTTPS_PROXY"] = proxy_for_token
-            os.environ["HTTP_PROXY"] = proxy_for_token
-        else:
-            os.environ.setdefault("HTTPS_PROXY", "http://127.0.0.1:7897")
-            os.environ.setdefault("HTTP_PROXY", "http://127.0.0.1:7897")
+    # 保存原 proxy env：extract_graph_token 需临时设代理访问微软，用完在 finally
+    # 恢复，避免永久污染 gateway 进程 → 内部转发误走代理 500。
+    _saved_proxy_env = {k: os.environ.get(k) for k in ("HTTP_PROXY", "HTTPS_PROXY")}
+    result = None
+    try:
+        if not os.environ.get("HTTPS_PROXY"):
+            proxy_for_token = ""
+            try:
+                # trust_env=False：取内部 /proxy 不走代理
+                async with _httpx.AsyncClient(timeout=5, trust_env=False) as _pc:
+                    _pr = await _pc.get("http://localhost:8000/proxy")
+                    _pl = _pr.json().get("data", [])
+                    _active = [p for p in _pl if p.get("status") in ("active", "available")]
+                    if _active:
+                        _s = _active[0]
+                        _u = _s.get("username", "")
+                        _pw = _s.get("password", "")
+                        _auth = f"{_u}:{_pw}@" if _u and _pw else ""
+                        proxy_for_token = f"{_s.get('type','socks5')}://{_auth}{_s['host']}:{_s['port']}"
+            except Exception:
+                pass
+            if proxy_for_token:
+                os.environ["HTTPS_PROXY"] = proxy_for_token
+                os.environ["HTTP_PROXY"] = proxy_for_token
+            else:
+                os.environ.setdefault("HTTPS_PROXY", "http://127.0.0.1:7897")
+                os.environ.setdefault("HTTP_PROXY", "http://127.0.0.1:7897")
 
-    from extract_graph_tokens import get_graph_token
-    loop = asyncio.get_event_loop()
-    result = await loop.run_in_executor(None, get_graph_token, email, password, 0)
+        from extract_graph_tokens import get_graph_token
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, get_graph_token, email, password, 0)
+    finally:
+        # 恢复 proxy env 到调用前状态（消除污染源）
+        for _k, _v in _saved_proxy_env.items():
+            if _v is None:
+                os.environ.pop(_k, None)
+            else:
+                os.environ[_k] = _v
 
     if result and result.get("refresh_token"):
         client_id = result.get("client_id", "9e5f94bc-e8a4-4e73-b8be-63364c29d753")
