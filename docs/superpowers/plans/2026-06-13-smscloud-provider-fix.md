@@ -49,9 +49,10 @@ API = "https://smscloud.sbs/api/system"
 def patch_http(monkeypatch, handler):
     """把 httpx.AsyncClient 换成带 MockTransport(handler) 的版本。
     handler(request)->httpx.Response，可借 request 断言 headers/url/params。"""
+    real_client = httpx.AsyncClient  # 先抓原始构造器，避免 fake 内部递归调到自己
     def fake_client(*args, **kwargs):
         kwargs.pop("transport", None)
-        return httpx.AsyncClient(*args, transport=httpx.MockTransport(handler), **kwargs)
+        return real_client(*args, transport=httpx.MockTransport(handler), **kwargs)
     monkeypatch.setattr(httpx, "AsyncClient", fake_client)
 
 

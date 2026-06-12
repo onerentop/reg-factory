@@ -31,17 +31,20 @@ class SmsCloudProvider(SMSProvider):
         return self._config.get("api_key", "")
 
     async def _get(self, path: str, params: dict | None = None) -> dict:
-        all_params = {"api_key": self._api_key}
-        if params:
-            all_params.update(params)
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.get(f"{self._base_url}{path}", params=all_params)
+        """GET {base_url}{path}，header 带 apiKey；校验信封 code==0 后返回 data。"""
+        async with httpx.AsyncClient(
+            timeout=30, headers={"apiKey": self._api_key}
+        ) as client:
+            resp = await client.get(f"{self._base_url}{path}", params=params or {})
             resp.raise_for_status()
-            return resp.json()
+            body = resp.json()
+        if body.get("code") != 0:
+            raise ValueError(f"SMS Cloud {body.get('code')}: {body.get('message')}")
+        return body.get("data") or {}
 
     async def get_balance(self) -> float:
-        result = await self._get("/get_balance")
-        return float(result.get("balance", 0))
+        data = await self._get("/public/sms/balance")
+        return float(data.get("balance", 0))
 
     async def get_number(self, service: str, country: str) -> AcquireResult:
         result = await self._get("/get_number", {
