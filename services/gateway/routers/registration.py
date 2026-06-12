@@ -9,6 +9,7 @@ router = APIRouter()
 async def trigger_outlook_registration(body: dict = {}):
     """从前端触发 Outlook 注册。用 multiprocessing 真并发。"""
     from worker.process_manager import task_manager, _fetch_proxy_from_manager
+    from worker.tasks._helpers import rotate_proxy_sid
     count = body.get("count", 1)
     proxy = body.get("proxy", "")
     config = dict(body.get("config", {}) or {})
@@ -19,7 +20,8 @@ async def trigger_outlook_registration(body: dict = {}):
         proxy = _fetch_proxy_from_manager()
     task_ids = []
     for i in range(count):
-        tid = task_manager.submit(idx=i, proxy=proxy, config=config)
+        # 每个并发窗口轮换 sid → 不同出口 IP，避免 PerimeterX 因同 IP 关联多账号
+        tid = task_manager.submit(idx=i, proxy=rotate_proxy_sid(proxy), config=config)
         task_ids.append(tid)
     return ApiResponse(data={"task_ids": task_ids, "status": "running", "count": count})
 

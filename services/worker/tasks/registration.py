@@ -1,7 +1,7 @@
 import os
 
 from worker.celery_app import celery_app, redis_url
-from worker.tasks._helpers import _fetch_proxy_from_manager
+from worker.tasks._helpers import _fetch_proxy_from_manager, rotate_proxy_sid
 
 
 @celery_app.task(name="register_outlook_single", bind=True)
@@ -20,6 +20,8 @@ def register_outlook_single(self, idx: int = 0, proxy: str = "", config: dict = 
 
     if not proxy:
         proxy = _fetch_proxy_from_manager()
+    # 每次注册轮换 sid → 新出口 IP(规避 sid 复用失效 + 多 task 并发同 IP)
+    proxy = rotate_proxy_sid(proxy)
 
     print(f"[outlook#{idx}] proxy={'yes: ' + proxy[:30] + '...' if proxy else 'NONE'}")
 

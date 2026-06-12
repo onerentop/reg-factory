@@ -1,4 +1,16 @@
 import random
+import re
+import string
+
+
+def rotate_proxy_sid(proxy_str: str) -> str:
+    """把 1024proxy username 里的 sid-XXXX 替换为新随机 8 位 sid。
+    非该格式(无 -sid-)的 proxy 原样返回。让并发注册的每个窗口/每次注册拿
+    不同 sid → 不同出口 IP(避免 PerimeterX 因同 IP 关联多个账号)。"""
+    if not proxy_str or "-sid-" not in proxy_str:
+        return proxy_str
+    new_sid = "".join(random.choices(string.ascii_letters + string.digits, k=8))
+    return re.sub(r"(-sid-)[A-Za-z0-9]+", r"\g<1>" + new_sid, proxy_str, count=1)
 
 
 def _fetch_proxy_from_manager() -> str:

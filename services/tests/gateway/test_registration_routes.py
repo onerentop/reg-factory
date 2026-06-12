@@ -75,6 +75,31 @@ def test_register_outlook_uses_provided_proxy(client):
     assert call_kwargs.get("proxy") == "socks5://user:pw@9.9.9.9:1080"
 
 
+def test_register_outlook_rotates_sid_per_window(client):
+    """count=2 并发：每个 submit 的 proxy 轮换不同 sid → 不同出口 IP
+    (避免 PerimeterX 因同 IP 关联多个账号)。"""
+    import re
+
+    proxies_used = []
+
+    def fake_submit(**kwargs):
+        proxies_used.append(kwargs.get("proxy"))
+        return f"tid-{len(proxies_used)}"
+
+    base = "socks5://sb7f3017-region-Rand-sid-ORIG1234-t-5:pw@us.1024proxy.io:3000"
+    with patch("worker.process_manager.task_manager") as mock_tm, \
+         patch("worker.process_manager._fetch_proxy_from_manager", return_value=base):
+        mock_tm.submit.side_effect = fake_submit
+        r = client.post("/register/outlook", json={"count": 2})
+
+    assert r.status_code == 200
+    assert len(proxies_used) == 2
+    sids = [re.search(r"-sid-([A-Za-z0-9]+)-t-", p).group(1) for p in proxies_used]
+    assert sids[0] != sids[1]  # 两窗口 sid 不同
+    assert all("us.1024proxy.io:3000" in p for p in proxies_used)
+    assert all(p.startswith("socks5://sb7f3017-region-Rand-sid-") for p in proxies_used)
+
+
 def test_register_outlook_mode_from_body(client):
     """body.mode 优先级最高，config 中传入的 mode 会被覆盖。"""
     with patch("worker.process_manager.task_manager") as mock_tm, \
