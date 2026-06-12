@@ -47,15 +47,13 @@ class SmsCloudProvider(SMSProvider):
         return float(data.get("balance", 0))
 
     async def get_number(self, service: str, country: str) -> AcquireResult:
-        result = await self._get("/get_number", {
-            "service_code": service,
-            "country": country,
+        data = await self._get("/public/sms/getNumber", {
+            "serviceCode": service,
+            "countryCode": country,
         })
-        if "phone" not in result:
-            raise ValueError(f"Failed to get number: {result}")
         return AcquireResult(
-            order_id=str(result.get("order_id", result.get("id", ""))),
-            phone_number=result["phone"],
+            order_id=str(data["id"]),
+            phone_number=data["phoneNumber"],
             provider=self.name,
         )
 

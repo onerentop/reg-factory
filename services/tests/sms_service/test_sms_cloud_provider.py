@@ -57,3 +57,27 @@ async def test_error_envelope_raises_valueerror(monkeypatch):
     patch_http(monkeypatch, handler)
     with pytest.raises(ValueError, match="40001"):
         await provider().get_balance()
+
+
+async def test_get_number_maps_fields_and_params(monkeypatch):
+    captured = {}
+
+    def handler(req):
+        captured["req"] = req
+        return httpx.Response(200, json={"code": 0, "message": "", "data": {
+            "id": "2046386613387407360",
+            "serviceCode": "tg",
+            "countryCode": "44",
+            "phoneNumber": "447700900123",
+            "creditAmount": 3.2,
+        }})
+
+    patch_http(monkeypatch, handler)
+    res = await provider().get_number("tg", "44")
+    assert res.order_id == "2046386613387407360"
+    assert res.phone_number == "447700900123"
+    assert res.provider == "sms_cloud"
+    assert captured["req"].url.path.endswith("/public/sms/getNumber")
+    q = dict(captured["req"].url.params)
+    assert q["serviceCode"] == "tg"
+    assert q["countryCode"] == "44"
