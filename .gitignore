@@ -86,3 +86,4 @@ proxypin_*
 *.tsbuildinfo
 %USERPROFILE%/
 .pytest_cache/
+services/scripts/_sweep_report.json
