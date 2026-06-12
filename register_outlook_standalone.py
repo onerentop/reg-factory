@@ -1916,6 +1916,15 @@ async def _register_one_headless(idx, proxy_str):
 
 
 @asynccontextmanager
+def _rotate_sid(proxy_str):
+    """轮换 1024proxy username 的 sid → 新出口 IP(代理失效时换会话)。非该格式原样返回。"""
+    import re as _re, random as _rnd, string as _str
+    if not proxy_str or "-sid-" not in proxy_str:
+        return proxy_str
+    _new = "".join(_rnd.choices(_str.ascii_letters + _str.digits, k=8))
+    return _re.sub(r"(-sid-)[A-Za-z0-9]+", r"\g<1>" + _new, proxy_str, count=1)
+
+
 async def _open_ixbrowser_page(bb, idx, proxy_str):
     """创建并连接一个 ixBrowser 页面，yield (page, context, profile_id)，退出时清理。
 
@@ -1924,36 +1933,62 @@ async def _open_ixbrowser_page(bb, idx, proxy_str):
     tag = f"[#{idx}]"
     profile_id = None
     try:
-        ts = datetime.now().strftime("%m%d_%H%M%S")
-        name = f"outlook_{ts}_{idx}"
-        for _retry in range(5):
+        cur_proxy = proxy_str
+        ws = ""
+        for _proxy_attempt in range(3):
+            ts = datetime.now().strftime("%m%d_%H%M%S")
+            name = f"outlook_{ts}_{idx}"
+            profile_id = None
+            for _retry in range(5):
+                try:
+                    profile_id = bb.create_browser(name=name, proxy_str=cur_proxy)
+                    break
+                except Exception as e:
+                    err_msg = str(e)
+                    if '最大创建窗口数' in err_msg or '超过' in err_msg:
+                        print(f"  {tag} browser quota full, cleaning up...")
+                        bb.cleanup_browsers(keep=2)
+                        await asyncio.sleep(3)
+                        continue
+                    elif 'TLS' in err_msg or 'socket' in err_msg or 'ECONNRESET' in err_msg:
+                        print(f"  {tag} ixBrowser TLS error (retry {_retry + 1}/5)")
+                        await asyncio.sleep(5 + _retry * 3)
+                        continue
+                    elif _retry < 4:
+                        print(f"  {tag} create browser error (retry {_retry + 1}): {err_msg[:80]}")
+                        await asyncio.sleep(3)
+                        continue
+                    else:
+                        raise
+            if not profile_id:
+                raise RuntimeError(f"{tag} create browser failed")
+
+            # open_profile 会做代理检测；代理失效(socket hang up / SSL EOF)时
+            # 换 sid 拿新出口 IP 重新建窗(随机 sid 有失效率，需容错)
             try:
-                profile_id = bb.create_browser(name=name, proxy_str=proxy_str)
+                info = bb.open_browser(profile_id)
+                ws = info.get("ws", "")
+                if not ws:
+                    raise RuntimeError(f"{tag} no WebSocket URL")
                 break
             except Exception as e:
-                err_msg = str(e)
-                if '最大创建窗口数' in err_msg or '超过' in err_msg:
-                    print(f"  {tag} browser quota full, cleaning up...")
-                    bb.cleanup_browsers(keep=2)
-                    await asyncio.sleep(3)
+                err = str(e).lower()
+                proxy_dead = any(k in err for k in
+                                 ["proxy detection", "socket hang", "connection error",
+                                  "ssl", "eof", "timed out", "no websocket"])
+                try:
+                    bb.delete_browser(profile_id)
+                except Exception:
+                    pass
+                profile_id = None
+                if proxy_dead and _proxy_attempt < 2:
+                    cur_proxy = _rotate_sid(cur_proxy)
+                    print(f"  {tag} 代理检测失败({str(e)[:50]})，换 sid 重试 {_proxy_attempt + 2}/3")
+                    await asyncio.sleep(2)
                     continue
-                elif 'TLS' in err_msg or 'socket' in err_msg or 'ECONNRESET' in err_msg:
-                    print(f"  {tag} ixBrowser TLS error (retry {_retry + 1}/5)")
-                    await asyncio.sleep(5 + _retry * 3)
-                    continue
-                elif _retry < 4:
-                    print(f"  {tag} create browser error (retry {_retry + 1}): {err_msg[:80]}")
-                    await asyncio.sleep(3)
-                    continue
-                else:
-                    raise
-        if not profile_id:
-            raise RuntimeError(f"{tag} create browser failed")
-
-        info = bb.open_browser(profile_id)
-        ws = info.get("ws", "")
-        if not ws:
-            raise RuntimeError(f"{tag} no WebSocket URL")
+                raise
+        if not profile_id or not ws:
+            raise RuntimeError(f"{tag} open browser failed (proxy rotation exhausted)")
 
         async with async_playwright() as p:
             browser = await p.chromium.connect_over_cdp(ws)
