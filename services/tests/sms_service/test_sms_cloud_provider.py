@@ -81,3 +81,35 @@ async def test_get_number_maps_fields_and_params(monkeypatch):
     q = dict(captured["req"].url.params)
     assert q["serviceCode"] == "tg"
     assert q["countryCode"] == "44"
+
+
+async def test_get_code_received(monkeypatch):
+    captured = {}
+
+    def handler(req):
+        captured["req"] = req
+        return httpx.Response(200, json={"code": 0, "message": "", "data": {
+            "id": "175847584743", "code": "123456",
+            "text": "Your verification code is 123456", "dateTime": 1776316890,
+        }})
+
+    patch_http(monkeypatch, handler)
+    res = await provider().get_code("175847584743", timeout=10)
+    assert res.code == "123456"
+    assert res.status == OrderStatus.RECEIVED
+    assert captured["req"].url.path.endswith("/public/sms/orders/sync/175847584743")
+
+
+async def test_get_code_timeout_when_code_empty(monkeypatch):
+    async def fast_sleep(_):
+        return None
+
+    monkeypatch.setattr(asyncio, "sleep", fast_sleep)
+
+    def handler(req):
+        return httpx.Response(200, json={"code": 0, "message": "", "data": {"id": "1", "code": None}})
+
+    patch_http(monkeypatch, handler)
+    res = await provider().get_code("1", timeout=10)
+    assert res.code is None
+    assert res.status == OrderStatus.TIMEOUT

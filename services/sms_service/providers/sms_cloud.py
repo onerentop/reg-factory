@@ -61,13 +61,10 @@ class SmsCloudProvider(SMSProvider):
         elapsed = 0
         interval = 5
         while elapsed < timeout:
-            result = await self._get("/get_code", {"order_id": order_id})
-            code = result.get("code")
+            data = await self._get(f"/public/sms/orders/sync/{order_id}")
+            code = data.get("code")
             if code:
                 return CodeResult(order_id=order_id, code=code, status=OrderStatus.RECEIVED)
-            status = result.get("status", "")
-            if status == "cancelled":
-                return CodeResult(order_id=order_id, code=None, status=OrderStatus.CANCELLED)
             await asyncio.sleep(interval)
             elapsed += interval
         return CodeResult(order_id=order_id, code=None, status=OrderStatus.TIMEOUT)
