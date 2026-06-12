@@ -113,3 +113,27 @@ async def test_get_code_timeout_when_code_empty(monkeypatch):
     res = await provider().get_code("1", timeout=10)
     assert res.code is None
     assert res.status == OrderStatus.TIMEOUT
+
+
+async def test_complete_hits_finish_endpoint(monkeypatch):
+    captured = {}
+
+    def handler(req):
+        captured["req"] = req
+        return httpx.Response(200, json={"code": 0, "message": "", "data": {}})
+
+    patch_http(monkeypatch, handler)
+    await provider().complete("oid9")
+    assert captured["req"].url.path.endswith("/public/sms/orders/finish/oid9")
+
+
+async def test_cancel_hits_cancel_endpoint(monkeypatch):
+    captured = {}
+
+    def handler(req):
+        captured["req"] = req
+        return httpx.Response(200, json={"code": 0, "message": "", "data": {}})
+
+    patch_http(monkeypatch, handler)
+    await provider().cancel("oid9")
+    assert captured["req"].url.path.endswith("/public/sms/orders/cancel/oid9")

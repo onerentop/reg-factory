@@ -70,7 +70,7 @@ class SmsCloudProvider(SMSProvider):
         return CodeResult(order_id=order_id, code=None, status=OrderStatus.TIMEOUT)
 
     async def complete(self, order_id: str) -> None:
-        await self._get("/complete", {"order_id": order_id})
+        await self._get(f"/public/sms/orders/finish/{order_id}")
 
     async def cancel(self, order_id: str) -> None:
-        await self._get("/cancel", {"order_id": order_id})
+        await self._get(f"/public/sms/orders/cancel/{order_id}")
