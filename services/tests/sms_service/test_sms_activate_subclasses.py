@@ -1,6 +1,7 @@
 """hero_sms / sms_bower 子类配置测：注册名、默认 base_url、display_name。
 直接实例化子类(register 装饰器在 import 时已注入 name)，不需要 mock HTTP。"""
 from sms_service.providers.hero_sms import HeroSmsProvider
+from sms_service.providers.sms_bower import SmsBowerProvider
 
 
 def test_hero_config():
@@ -13,3 +14,10 @@ def test_hero_config():
 def test_hero_config_base_url_override():
     p = HeroSmsProvider({"api_key": "k", "base_url": "https://custom/handler_api.php"})
     assert p._base_url == "https://custom/handler_api.php"
+
+
+def test_bower_config():
+    p = SmsBowerProvider({"api_key": "k"})
+    assert p.name == "sms_bower"
+    assert p.display_name == "SmsBower"
+    assert p._base_url == "https://smsbower.com/stubs/handler_api.php"
