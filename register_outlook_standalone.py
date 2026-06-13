@@ -1203,6 +1203,8 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False, prox
                 # 德语 / 葡语 / 意语的"被阻止/异常活动"
                 "blockiert", "ungewöhnliche aktivität", "atividade incomum",
                 "bloqueada a criação", "attività insolita", "creazione dell'account è stata bloccata",
+                # 越南语(Tạo tài khoản đã bị chặn / hoạt động bất thường)
+                "đã bị chặn", "hoạt động bất thường",
             ]):
                 print(f"  {tag} BLOCKED: account creation blocked by Microsoft")
                 await page.screenshot(path=f"{SCREENSHOT_DIR}/outlook_{idx}_blocked.png")
@@ -1213,6 +1215,15 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False, prox
             if "ran into a problem" in page_text or "problem aufgetreten" in page_text:
                 print(f"  {tag} TEMP ERROR: We ran into a problem — 放弃换 IP")
                 await page.screenshot(path=f"{SCREENSHOT_DIR}/outlook_{idx}_temp_error.png")
+                return None, None
+
+            # 语言无关兜底：等了 45s(15 轮)从没出现过 PerimeterX 长按按钮(press_count==0)，
+            # 说明这根本不是 captcha 页，而是各语言的终止页(账户阻止/服务端错误,文本关键词
+            # 漏网)。直接放弃换 IP，不死等到 captcha timeout(避免每个新语言都要补关键词)。
+            # success 检测在前已 break，故此处不会误杀注册成功的情况。
+            if press_count == 0 and wait_round >= 15:
+                print(f"  {tag} {wait_round*3}s 仍无 captcha 长按按钮 → 判定终止页/错误，放弃换 IP")
+                await page.screenshot(path=f"{SCREENSHOT_DIR}/outlook_{idx}_stuck_giveup.png")
                 return None, None
 
             # FIDO/passkey - skip
