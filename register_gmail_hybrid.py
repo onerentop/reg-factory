@@ -315,6 +315,24 @@ async def browser_phone_and_finalize(page, profile, ctx=None, profile_id=None, s
     svc_maxprice = sms_config.get("max_price", max_price)
     svc_fixed = sms_config.get("fixed_price", fixed)
 
+    # 自动探测国家（auto_probe 开 + 走 services）：按价升序候选序列逐国试，
+    # 收到码记可用、失败记冷却，结束回写可用库。
+    auto_probe = bool(sms_config.get("auto_probe")) and use_svc
+    probe = None
+    seq = []
+    if auto_probe:
+        import time as _time
+        from common.country_probe import (
+            build_probe_sequence, mark_available, mark_failed, probe_load, probe_save, probe_prices,
+        )
+        probe = probe_load()
+        _prices = probe_prices(svc_provider)
+        seq = build_probe_sequence(_prices, probe, svc_maxprice, int(_time.time()))
+        log(f"[probe] 候选国家 {len(seq)} 个(≤{svc_maxprice}): {[s['country'] for s in seq[:8]]}")
+        if not seq:
+            log("[probe] 无候选国家(都在冷却或超价)，放弃", "WARN")
+            return None
+
     def _release(pk):
         if not pk:
             return
@@ -328,10 +346,19 @@ async def browser_phone_and_finalize(page, profile, ctx=None, profile_id=None, s
 
     for attempt in range(1, max_tries + 1):
         pkey = None
+        if auto_probe:
+            if attempt - 1 >= len(seq):
+                log("[probe] 候选国家已试完", "WARN")
+                break
+            _cur = seq[attempt - 1]
+            cur_country, cur_name, cur_price = _cur["country"], _cur["name"], _cur["price"]
+        else:
+            cur_country = svc_country
         try:
             if use_svc:
-                log(f"[sms] 取号 services({svc_provider}, 国家={svc_country}, 第 {attempt}/{max_tries})...")
-                _ph, _oid = _svc_acquire(svc_provider, svc_country, svc_maxprice, svc_fixed, service=hero_svc)
+                _ctag = f"{cur_name} {cur_country} ${cur_price}" if auto_probe else f"国家={cur_country}"
+                log(f"[sms] 取号 services({svc_provider}, {_ctag}, 第 {attempt}/{max_tries})...")
+                _ph, _oid = _svc_acquire(svc_provider, cur_country, svc_maxprice, svc_fixed, service=hero_svc)
                 if not _ph:
                     raise RuntimeError("services 取号无号")
                 pkey = f"svc_{_oid}"
@@ -347,6 +374,8 @@ async def browser_phone_and_finalize(page, profile, ctx=None, profile_id=None, s
                 log(f"[sms] 号: {e164}")
         except Exception as e:
             log(f"[sms] 取号失败: {e}", "WARN")
+            if auto_probe and probe is not None:
+                mark_failed(probe, cur_country, f"取号失败:{str(e)[:30]}", int(_time.time()))
             await asyncio.sleep(2)
             continue
 
@@ -373,6 +402,8 @@ async def browser_phone_and_finalize(page, profile, ctx=None, profile_id=None, s
             if not code:
                 log(f"[sms] {e164} 没收到码，换号", "WARN")
                 _release(pkey)
+                if auto_probe and probe is not None:
+                    mark_failed(probe, cur_country, "无码", int(_time.time()))
                 await page.go_back(timeout=10000)
                 await asyncio.sleep(2)
                 continue
@@ -386,6 +417,8 @@ async def browser_phone_and_finalize(page, profile, ctx=None, profile_id=None, s
             await click_next(page)
             await asyncio.sleep(5)
             phone_used = e164
+            if auto_probe and probe is not None:
+                mark_available(probe, cur_country, cur_name, cur_price, int(_time.time()))
             log(f"[sms] 验证码已提交! ({e164} 码={code})", "OK")
             break
         else:
@@ -397,6 +430,8 @@ async def browser_phone_and_finalize(page, profile, ctx=None, profile_id=None, s
                 diag = page.url[:50]
             log(f"[sms] {e164} 不可用，换号 | 页面: {diag}", "WARN")
             _release(pkey)
+            if auto_probe and probe is not None:
+                mark_failed(probe, cur_country, diag[:40], int(_time.time()))
             if consecutive_reject >= 5:
                 log("[sms] 连续5个号被拒，会话可能不被信任，放弃", "WARN")
                 break
@@ -406,6 +441,10 @@ async def browser_phone_and_finalize(page, profile, ctx=None, profile_id=None, s
                 except Exception: pass
                 await asyncio.sleep(2)
             continue
+
+    if auto_probe and probe is not None:
+        probe_save(probe)
+        log(f"[probe] 回写可用库: 可用{len(probe.get('available', []))}国 / 冷却{len(probe.get('failed', {}))}国")
 
     if not phone_used:
         log("[sms] 重试用尽，手机验证未通过", "WARN")
