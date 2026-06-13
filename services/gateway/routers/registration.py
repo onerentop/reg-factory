@@ -25,9 +25,9 @@ async def _pick_active_proxy(session: AsyncSession) -> str:
     return f"{p.type or 'socks5'}://{auth}{p.host}:{p.port}"
 
 
-@router.post("/register/outlook", response_model=ApiResponse)
-async def trigger_outlook_registration(body: dict = {}, session: AsyncSession = Depends(get_session)):
-    """从前端触发 Outlook 注册。用 multiprocessing 真并发。"""
+@router.post("/register/{platform}", response_model=ApiResponse)
+async def trigger_registration(platform: str, body: dict = {}, session: AsyncSession = Depends(get_session)):
+    """从前端触发注册(platform=outlook/google)，分发到对应 flow。multiprocessing 真并发。"""
     from worker.process_manager import task_manager
     from worker.tasks._helpers import rotate_proxy_sid
     count = body.get("count", 1)
@@ -41,7 +41,7 @@ async def trigger_outlook_registration(body: dict = {}, session: AsyncSession = 
     task_ids = []
     for i in range(count):
         # 每个并发窗口轮换 sid → 不同出口 IP，避免 PerimeterX 因同 IP 关联多账号
-        tid = task_manager.submit(idx=i, proxy=rotate_proxy_sid(proxy), config=config)
+        tid = task_manager.submit(idx=i, proxy=rotate_proxy_sid(proxy), config=config, platform=platform)
         task_ids.append(tid)
     return ApiResponse(data={"task_ids": task_ids, "status": "running", "count": count})
 

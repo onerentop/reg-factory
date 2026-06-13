@@ -131,7 +131,7 @@ export default function AccountsPage() {
     setTaskOrder([])
     setActiveTab('')
     try {
-      const resp = await fetch('/api/register/outlook', {
+      const resp = await fetch(`/api/register/${platform}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ count: registerCount, proxy: selectedProxy, mode: registerMode }),

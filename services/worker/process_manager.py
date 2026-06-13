@@ -38,7 +38,7 @@ def _fetch_proxy_from_manager() -> str:
     return ""
 
 
-def _worker_process(task_id: str, idx: int, proxy: str, config: dict, redis_url: str):
+def _worker_process(task_id: str, idx: int, proxy: str, config: dict, redis_url: str, platform: str = "outlook"):
     """子进程入口。独立的 Python 进程，有自己的事件循环。"""
     # 确保项目根目录在 path 中
     services_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -124,7 +124,7 @@ def _worker_process(task_id: str, idx: int, proxy: str, config: dict, redis_url:
             print(f"[process#{idx}] 并发错开，等 {idx * _stagger}s 再启动")
             await _aio.sleep(idx * _stagger)
         from worker.step_engine import FlowRegistry
-        flow = FlowRegistry.get("outlook")
+        flow = FlowRegistry.get(platform)
         context = {"idx": idx, "proxy": proxy, **(config or {})}
         step_results = await flow.run(context)
         success = all(sr.success for sr in step_results)
@@ -137,7 +137,7 @@ def _worker_process(task_id: str, idx: int, proxy: str, config: dict, redis_url:
                 import httpx
                 async with httpx.AsyncClient(timeout=10) as client:
                     create_resp = await client.post("http://localhost:8002/accounts", json={
-                        "email": email, "password": password, "platform": "outlook",
+                        "email": email, "password": password, "platform": platform,
                         "total_steps": len(step_results),
                         "metadata": {"proxy": proxy[:30] if proxy else ""},
                     })
@@ -181,12 +181,12 @@ class TaskManager:
         self._redis_url = redis_url
         self._tasks: dict[str, dict] = {}
 
-    def submit(self, idx: int = 0, proxy: str = "", config: dict | None = None) -> str:
+    def submit(self, idx: int = 0, proxy: str = "", config: dict | None = None, platform: str = "outlook") -> str:
         """提交一个注册任务，返回 task_id。"""
         task_id = str(uuid.uuid4())
         p = multiprocessing.Process(
             target=_worker_process,
-            args=(task_id, idx, proxy, config or {}, self._redis_url),
+            args=(task_id, idx, proxy, config or {}, self._redis_url, platform),
             daemon=True,
         )
         p.start()

@@ -155,6 +155,23 @@ def test_register_outlook_empty_body(client):
     assert r.json()["data"]["count"] == 1  # 默认 count=1
 
 
+def test_register_google_passes_platform(client):
+    """POST /register/google → submit 收到 platform='google'(分发到 google flow)。"""
+    captured = {}
+
+    def fake_submit(**kwargs):
+        captured.update(kwargs)
+        return "tid-g"
+
+    with patch("gateway.routers.registration._pick_active_proxy", new_callable=AsyncMock, return_value=""), \
+         patch("worker.process_manager.task_manager") as mock_tm:
+        mock_tm.submit.side_effect = fake_submit
+        r = client.post("/register/google", json={"count": 1})
+
+    assert r.status_code == 200
+    assert captured.get("platform") == "google"
+
+
 # ──────────────────────────────────────────────
 # GET /tasks/{task_id}
 # ──────────────────────────────────────────────
