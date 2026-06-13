@@ -458,7 +458,7 @@ async def extract_graph_token(page, context, email, password, idx=0):
 
             # 1. 邮箱输入页（先于密码）
             email_input = page.locator('input[type="email"], input[name="loginfmt"], input#usernameEntry, input#identifierId').first
-            if not logged_in and await email_input.count() > 0 and await email_input.is_visible():
+            if not logged_in and await _safe_count(email_input) > 0 and await _safe_visible(email_input):
                 try:
                     await email_input.fill(email, timeout=3000)
                     await page.locator('#idSIButton9, button[type="submit"]').first.click(timeout=3000)
@@ -486,7 +486,7 @@ async def extract_graph_token(page, context, email, password, idx=0):
             # 3. 密码输入页
             await asyncio.sleep(1)
             pwd_input = page.locator('input[type="password"], input[name="passwd"], input#passwordEntry').first
-            if not logged_in and await pwd_input.count() > 0 and await pwd_input.is_visible():
+            if not logged_in and await _safe_count(pwd_input) > 0 and await _safe_visible(pwd_input):
                 try:
                     await pwd_input.fill(password, timeout=3000)
                     await page.locator('#idSIButton9, button[type="submit"]').first.click(timeout=3000)
@@ -627,6 +627,14 @@ async def _safe_count(locator):
         return await locator.count()
     except Exception:
         return 0
+
+
+async def _safe_visible(locator):
+    """locator.is_visible() 容错：导航中 context 销毁时视为不可见。"""
+    try:
+        return await locator.is_visible()
+    except Exception:
+        return False
 
 
 async def register_outlook(page, context, idx=0, captcha_early_abort=False):
