@@ -255,8 +255,47 @@ async def wait_phone_page(page, max_wait=240):
 
 # ======================== 浏览器手机验证 + 建号收尾 ========================
 
-async def browser_phone_and_finalize(page, profile, ctx=None, profile_id=None):
-    """全浏览器：手机换号重试 + 收码 + 条款同意 + 建号（同一会话，BotGuard 原生）。"""
+def _svc_acquire(provider, country, max_price, fixed, service="go"):
+    """走 services sms_service 取号。返回 (phone, order_id) 或 (None, None)。"""
+    import requests as _r
+    try:
+        resp = _r.post("http://localhost:8001/sms/number/acquire", json={
+            "service": service, "country": str(country), "provider": provider,
+            "max_price": str(max_price), "fixed_price": bool(fixed),
+        }, timeout=30, proxies={"http": None, "https": None})
+        d = resp.json().get("data") or {}
+        return d.get("phone_number"), d.get("order_id")
+    except Exception as e:
+        log(f"  [svc-sms] acquire err: {e}", "WARN")
+        return None, None
+
+
+def _svc_code(order_id, max_wait=180):
+    """走 services sms_service 收码。返回 code 或 None。"""
+    import requests as _r
+    try:
+        resp = _r.get(f"http://localhost:8001/sms/number/{order_id}/code",
+                      params={"timeout": max_wait}, timeout=max_wait + 10,
+                      proxies={"http": None, "https": None})
+        return (resp.json().get("data") or {}).get("code")
+    except Exception as e:
+        log(f"  [svc-sms] code err: {e}", "WARN")
+        return None
+
+
+def _svc_cancel(order_id):
+    """走 services sms_service 释放号（取消订单）。"""
+    import requests as _r
+    try:
+        _r.post(f"http://localhost:8001/sms/number/{order_id}/cancel",
+                timeout=15, proxies={"http": None, "https": None})
+    except Exception as e:
+        log(f"  [svc-sms] cancel err: {e}", "WARN")
+
+
+async def browser_phone_and_finalize(page, profile, ctx=None, profile_id=None, sms_config=None):
+    """全浏览器：手机换号重试 + 收码 + 条款同意 + 建号（同一会话，BotGuard 原生）。
+    sms_config 含 provider 时走 services sms_service 取号/收码/释放，否则用旧 common/sms.py。"""
     import re as _re
     sms = P.sms_client
     hero_svc = os.environ.get("HERO_SMS_SERVICE_GMAIL", "go")
@@ -268,16 +307,44 @@ async def browser_phone_and_finalize(page, profile, ctx=None, profile_id=None):
     phone_used = None
     consecutive_reject = 0
 
+    # services 接码配置（sms_config 有 provider 时优先走 services sms_service）
+    sms_config = sms_config or {}
+    use_svc = bool(sms_config.get("provider"))
+    svc_provider = sms_config.get("provider", "")
+    svc_country = sms_config.get("country", hero_country)
+    svc_maxprice = sms_config.get("max_price", max_price)
+    svc_fixed = sms_config.get("fixed_price", fixed)
+
+    def _release(pk):
+        if not pk:
+            return
+        if str(pk).startswith("svc_"):
+            _svc_cancel(pk[4:])
+        else:
+            try:
+                sms.release(pk)
+            except Exception:
+                pass
+
     for attempt in range(1, max_tries + 1):
         pkey = None
         try:
-            log(f"[sms] 取号 (第 {attempt}/{max_tries}, 国家={hero_country})...")
-            raw, cc, pkey = sms.get_phone(
-                "", hero_svc, max_price=max_price,
-                hero_country=hero_country, hero_fixed_price=fixed)
-            full = (cc + raw) if cc else raw
-            e164, _ = P._split_intl_phone(full)
-            log(f"[sms] 号: {e164}")
+            if use_svc:
+                log(f"[sms] 取号 services({svc_provider}, 国家={svc_country}, 第 {attempt}/{max_tries})...")
+                _ph, _oid = _svc_acquire(svc_provider, svc_country, svc_maxprice, svc_fixed, service=hero_svc)
+                if not _ph:
+                    raise RuntimeError("services 取号无号")
+                pkey = f"svc_{_oid}"
+                e164, _ = P._split_intl_phone(_ph)
+                log(f"[sms] 号(svc): {e164}")
+            else:
+                log(f"[sms] 取号 (第 {attempt}/{max_tries}, 国家={hero_country})...")
+                raw, cc, pkey = sms.get_phone(
+                    "", hero_svc, max_price=max_price,
+                    hero_country=hero_country, hero_fixed_price=fixed)
+                full = (cc + raw) if cc else raw
+                e164, _ = P._split_intl_phone(full)
+                log(f"[sms] 号: {e164}")
         except Exception as e:
             log(f"[sms] 取号失败: {e}", "WARN")
             await asyncio.sleep(2)
@@ -290,8 +357,7 @@ async def browser_phone_and_finalize(page, profile, ctx=None, profile_id=None):
             await inp.fill(e164, timeout=4000)
         except Exception as e:
             log(f"[sms] 填号失败: {e}", "WARN")
-            try: sms.release(pkey)
-            except Exception: pass
+            _release(pkey)
             continue
         await click_next(page)
         await asyncio.sleep(5)
@@ -300,11 +366,13 @@ async def browser_phone_and_finalize(page, profile, ctx=None, profile_id=None):
         if await is_visible(page, "input#code, input[name=code]", 3):
             consecutive_reject = 0
             log(f"[sms] {e164} 被接受，等码 (≤{code_wait}s)...")
-            code = sms.get_code(pkey, max_wait=code_wait, interval=4)
+            if pkey and str(pkey).startswith("svc_"):
+                code = _svc_code(pkey[4:], max_wait=code_wait)
+            else:
+                code = sms.get_code(pkey, max_wait=code_wait, interval=4)
             if not code:
                 log(f"[sms] {e164} 没收到码，换号", "WARN")
-                try: sms.release(pkey)
-                except Exception: pass
+                _release(pkey)
                 await page.go_back(timeout=10000)
                 await asyncio.sleep(2)
                 continue
@@ -328,8 +396,7 @@ async def browser_phone_and_finalize(page, profile, ctx=None, profile_id=None):
             except Exception:
                 diag = page.url[:50]
             log(f"[sms] {e164} 不可用，换号 | 页面: {diag}", "WARN")
-            try: sms.release(pkey)
-            except Exception: pass
+            _release(pkey)
             if consecutive_reject >= 5:
                 log("[sms] 连续5个号被拒，会话可能不被信任，放弃", "WARN")
                 break
