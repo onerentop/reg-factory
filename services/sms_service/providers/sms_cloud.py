@@ -1,5 +1,6 @@
 import asyncio
 import httpx
+from typing import Any
 
 from sms_service.providers.base import (
     SMSProvider,
@@ -30,7 +31,7 @@ class SmsCloudProvider(SMSProvider):
     def _api_key(self) -> str:
         return self._config.get("api_key", "")
 
-    async def _get(self, path: str, params: dict | None = None) -> dict:
+    async def _get(self, path: str, params: dict | None = None) -> Any:
         """GET {base_url}{path}，header 带 apiKey；校验信封 code==0 后返回 data。"""
         async with httpx.AsyncClient(
             timeout=30, headers={"apiKey": self._api_key}
@@ -74,3 +75,16 @@ class SmsCloudProvider(SMSProvider):
 
     async def cancel(self, order_id: str) -> None:
         await self._get(f"/public/sms/orders/cancel/{order_id}")
+
+    async def get_prices(self, service: str) -> list[dict[str, Any]]:
+        # getInventory 返回 data 列表（_get 已解信封）；retailPrice=零售价，count=库存
+        data = await self._get("/public/sms/getInventory", {"serviceCode": service})
+        rows = data if isinstance(data, list) else []
+        out = [{
+            "country": str(r["country"]),
+            "country_name": r.get("countryName", ""),
+            "cost": float(r.get("retailPrice", 0)),
+            "count": int(r.get("count", 0)),
+        } for r in rows if "country" in r]
+        out.sort(key=lambda r: r["cost"])
+        return out
