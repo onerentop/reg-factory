@@ -44,6 +44,10 @@ class SmsService:
         balance = await provider.get_balance()
         return BalanceResponse(provider=provider_name, balance=balance)
 
+    async def get_prices(self, provider_name: str, service: str) -> list:
+        provider = await self._get_provider(provider_name)
+        return await provider.get_prices(service)
+
     async def acquire_number(
         self, service: str, country: str, provider_name: str | None = None
     ) -> AcquireResult:

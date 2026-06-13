@@ -136,3 +136,28 @@ def test_save_config_minimal_happy(client):
     # PlatformConfigWrite has all optional fields with defaults
     r = client.put("/sms/config/smsactivate", json={})
     assert r.status_code == 200
+
+
+# ── GET /sms/providers/{name}/prices ─────────────────────────────────────────
+
+def test_get_prices_route(client):
+    from sms_service.main import app, get_service
+    class _Svc:
+        async def get_prices(self, name, service):
+            return [{"country": "52", "cost": 0.1, "count": 100}]
+    app.dependency_overrides[get_service] = lambda: _Svc()
+    r = client.get("/sms/providers/hero_sms/prices?service=go")
+    app.dependency_overrides.pop(get_service, None)
+    assert r.status_code == 200
+    assert r.json()["data"][0]["country"] == "52"
+
+
+def test_get_prices_bad_provider_400(client):
+    from sms_service.main import app, get_service
+    class _Svc:
+        async def get_prices(self, name, service):
+            raise ValueError("Platform 'x' not configured")
+    app.dependency_overrides[get_service] = lambda: _Svc()
+    r = client.get("/sms/providers/x/prices?service=go")
+    app.dependency_overrides.pop(get_service, None)
+    assert r.status_code == 400
