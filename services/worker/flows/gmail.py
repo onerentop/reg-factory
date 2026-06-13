@@ -33,24 +33,28 @@ class GmailRegistrationFlow(RegistrationFlow):
         from common.browser import open_and_connect
         from register_gmail_hybrid import drive_to_phone, build_signup_url
         from playwright.async_api import async_playwright
-        async with async_playwright() as p:
-            bb, pid, browser, ctx, page = await open_and_connect(
-                name=f"gmail_{context.get('profile', {}).get('first', 'unknown')}", p=p,
-                proxy_str=context.get("proxy", ""),
-            )
-            context["_bb"] = bb
-            context["_pid"] = pid
-            context["_page"] = page
-            context["_context"] = ctx
-            signup_url = build_signup_url()
-            await page.goto(signup_url, timeout=60000, wait_until="domcontentloaded")
-            await asyncio.sleep(3)
-            profile = context.get("profile", {})
-            success = await drive_to_phone(page, profile)
-            context["profile"] = profile
-            if success:
-                return StepResult(success=True, data={"username": profile.get("username", "")})
-            return StepResult(success=False, error="Failed to drive to phone verification page")
+        # 不能用 `async with async_playwright()`：它会在本 step return 时 stop() driver，
+        # 导致后续 _step_phone_verify 拿到的 page 失效（Target page/browser has been closed）。
+        # 改为手动 start() 并存入 context，跨 step 保活，由 _step_save_cleanup 统一 stop()。
+        p = await async_playwright().start()
+        context["_pw"] = p
+        bb, pid, browser, ctx, page = await open_and_connect(
+            name=f"gmail_{context.get('profile', {}).get('first', 'unknown')}", p=p,
+            proxy_str=context.get("proxy", ""),
+        )
+        context["_bb"] = bb
+        context["_pid"] = pid
+        context["_page"] = page
+        context["_context"] = ctx
+        signup_url = build_signup_url()
+        await page.goto(signup_url, timeout=60000, wait_until="domcontentloaded")
+        await asyncio.sleep(3)
+        profile = context.get("profile", {})
+        success = await drive_to_phone(page, profile)
+        context["profile"] = profile
+        if success:
+            return StepResult(success=True, data={"username": profile.get("username", "")})
+        return StepResult(success=False, error="Failed to drive to phone verification page")
 
     async def _step_phone_verify(self, context: dict, services) -> StepResult:
         page = context.get("_page")
@@ -77,6 +81,12 @@ class GmailRegistrationFlow(RegistrationFlow):
         if bb and pid:
             from common.browser import teardown
             await teardown(bb, pid, delete=True)
+        pw = context.pop("_pw", None)
+        if pw:
+            try:
+                await pw.stop()
+            except Exception:
+                pass
         return StepResult(success=True, data={
             "email": context.get("email"),
             "password": context.get("password"),
