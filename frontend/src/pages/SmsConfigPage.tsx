@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Table, Tag, Button, Modal, Form, Input, Switch, InputNumber, message, Spin } from 'antd'
+import { Table, Tag, Button, Modal, Form, Input, Switch, InputNumber, message, Spin, Card, Select } from 'antd'
 import { EditOutlined, DollarOutlined } from '@ant-design/icons'
 
 interface Provider {
@@ -24,6 +24,8 @@ export default function SmsConfigPage() {
   const [editingProvider, setEditingProvider] = useState<string>('')
   const [balances, setBalances] = useState<Record<string, number>>({})
   const [form] = Form.useForm()
+  const [gmailCfg, setGmailCfg] = useState<{provider:string;country:string;max_price:string;fixed_price:boolean}>({ provider: 'hero_sms', country: '', max_price: '0.2', fixed_price: false })
+  const [gmailPrices, setGmailPrices] = useState<{country:string;cost:number;count:number;country_name?:string}[]>([])
 
   useEffect(() => {
     Promise.all([
@@ -35,6 +37,28 @@ export default function SmsConfigPage() {
     }).catch(() => message.error('加载失败'))
       .finally(() => setLoading(false))
   }, [])
+
+  useEffect(() => {
+    fetch('/api/config/gmail_sms_config').then(r => r.json()).then(res => {
+      if (res.data?.value) setGmailCfg(res.data.value)
+    }).catch(() => {})
+  }, [])
+
+  const loadPrices = (provider: string) => {
+    fetch(`/api/sms/providers/${provider}/prices?service=go`).then(r => r.json())
+      .then(res => setGmailPrices(res.data || [])).catch(() => setGmailPrices([]))
+  }
+
+  const saveGmailCfg = () => {
+    fetch('/api/config/gmail_sms_config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: 'gmail_sms_config', value: gmailCfg }),
+    }).then(r => r.json()).then(res => {
+      if (res.success === false) message.error(res.message || '保存失败')
+      else message.success('已保存')
+    }).catch(() => message.error('保存失败'))
+  }
 
   const checkBalance = async (name: string) => {
     try {
@@ -107,6 +131,24 @@ export default function SmsConfigPage() {
     <div>
       <h2 style={{ marginBottom: 24 }}>接码平台配置</h2>
       <Table rowKey="name" columns={columns} dataSource={providers} pagination={false} />
+
+      <Card title="Google 注册接码" style={{ marginTop: 16 }}>
+        <Form layout="inline">
+          <Form.Item label="平台">
+            <Select style={{ width: 140 }} value={gmailCfg.provider}
+              onChange={(v) => { setGmailCfg({ ...gmailCfg, provider: v }); loadPrices(v) }}
+              options={providers.map(p => ({ value: p.name, label: p.display_name || p.name }))} />
+          </Form.Item>
+          <Form.Item label="国家">
+            <Select style={{ width: 220 }} value={gmailCfg.country} showSearch
+              onChange={(v) => { const row = gmailPrices.find(r => r.country === v); setGmailCfg({ ...gmailCfg, country: v, max_price: row ? String(row.cost) : gmailCfg.max_price }) }}
+              options={gmailPrices.map(r => ({ value: r.country, label: `${r.country_name || r.country} / ${r.cost} / 库存${r.count}` }))} />
+          </Form.Item>
+          <Form.Item label="价格上限"><InputNumber min={0} step={0.1} value={Number(gmailCfg.max_price)} onChange={(v) => setGmailCfg({ ...gmailCfg, max_price: String(v ?? 0) })} /></Form.Item>
+          <Form.Item label="固定价格"><Switch checked={gmailCfg.fixed_price} onChange={(v) => setGmailCfg({ ...gmailCfg, fixed_price: v })} /></Form.Item>
+          <Button type="primary" onClick={saveGmailCfg}>保存</Button>
+        </Form>
+      </Card>
 
       <Modal title={`配置 ${editingProvider}`} open={editVisible} onOk={saveConfig} onCancel={() => setEditVisible(false)}>
         <Form form={form} layout="vertical">
