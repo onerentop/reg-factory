@@ -60,7 +60,8 @@ class GmailRegistrationFlow(RegistrationFlow):
             return StepResult(success=False, error="No browser session available")
         from register_gmail_hybrid import browser_phone_and_finalize
         pid = context.get("_pid")
-        result = await browser_phone_and_finalize(page, profile, ctx=ctx, profile_id=pid)
+        result = await browser_phone_and_finalize(page, profile, ctx=ctx, profile_id=pid,
+                                                  sms_config=context.get("sms"))
         if result and result.get("email"):
             context["email"] = result["email"]
             context["password"] = profile.get("pw", "")
