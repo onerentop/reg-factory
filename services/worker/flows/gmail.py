@@ -78,9 +78,28 @@ class GmailRegistrationFlow(RegistrationFlow):
         pid = context.pop("_pid", None)
         context.pop("_page", None)
         context.pop("_context", None)
+        email = context.get("email")
         if bb and pid:
-            from common.browser import teardown
-            await teardown(bb, pid, delete=True)
+            if email:
+                # 成功建号：保留窗口（不删 profile），仅关闭；窗口改名=邮箱、备注=密码|手机，便于识别。
+                try:
+                    bb.close_browser(pid)
+                except Exception:
+                    pass
+                try:
+                    from ixbrowser_local_api.entities import Profile as _IxProfile
+                    up = _IxProfile()
+                    up.profile_id = int(pid)
+                    up.name = email
+                    _res = context.get("result", {}) or {}
+                    up.note = f"{context.get('password', '')} | {_res.get('phone', '')}"
+                    bb._call("update_profile", up)
+                except Exception:
+                    pass
+            else:
+                # 失败：删除窗口释放 ixBrowser 配额
+                from common.browser import teardown
+                await teardown(bb, pid, delete=True)
         pw = context.pop("_pw", None)
         if pw:
             try:
