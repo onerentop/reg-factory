@@ -1182,12 +1182,17 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False, prox
                 print(f"  {tag} left signup: {current_url[:60]}")
                 break
 
-            # Account blocked detection (CN/EN/FR)
+            # Account blocked detection（界面随出口 IP 国家本地化，多语言覆盖）
             if any(kw in page_text for kw in [
                 "帐户创建已被阻止", "已被阻止", "阻止创建",
                 "account creation has been blocked", "has been blocked", "account has been suspended",
                 "création de compte a été bloquée", "a été bloquée", "bloquée",
                 "unusual activity", "异常活动", "activité inhabituelle",
+                # 西语(Se bloqueó la creación de cuentas / actividad inusual)
+                "se bloqueó", "bloqueó la creación", "bloqueado la creación", "actividad inusual",
+                # 德语 / 葡语 / 意语的"被阻止/异常活动"
+                "blockiert", "ungewöhnliche aktivität", "atividade incomum",
+                "bloqueada a criação", "attività insolita", "creazione dell'account è stata bloccata",
             ]):
                 print(f"  {tag} BLOCKED: account creation blocked by Microsoft")
                 await page.screenshot(path=f"{SCREENSHOT_DIR}/outlook_{idx}_blocked.png")
