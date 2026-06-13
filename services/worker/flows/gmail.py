@@ -36,6 +36,7 @@ class GmailRegistrationFlow(RegistrationFlow):
         async with async_playwright() as p:
             bb, pid, browser, ctx, page = await open_and_connect(
                 name=f"gmail_{context.get('profile', {}).get('first', 'unknown')}", p=p,
+                proxy_str=context.get("proxy", ""),
             )
             context["_bb"] = bb
             context["_pid"] = pid
