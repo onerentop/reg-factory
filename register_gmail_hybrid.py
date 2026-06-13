@@ -487,10 +487,20 @@ async def browser_phone_and_finalize(page, profile, ctx=None, profile_id=None, s
     email = f"{profile.get('username','?')}@gmail.com"
     await asyncio.sleep(2)
 
-    # Step1: 确认页 → 点"下一步"
-    log("[finalize] 确认页...")
-    await click_next(page)
-    await asyncio.sleep(5)
+    # Step1: 穿过确认页 / "查看您的账号信息"页 → 反复点"下一步"直到条款页"我同意"出现
+    # （手机验证后到条款页之间可能有 1~2 个确认页，页数不固定，故循环自适应）
+    agree_sels = ['button:has-text("我同意")', 'button:has-text("I agree")']
+    log("[finalize] 推进到条款页（穿过确认/账号信息页）...")
+    for _step in range(6):
+        _on_tos = False
+        for _s in agree_sels:
+            if await is_visible(page, _s, 1.5):
+                _on_tos = True
+                break
+        if _on_tos:
+            break
+        await click_next(page)
+        await asyncio.sleep(4)
 
     # Step2: 条款页 → 等按钮出现 → 滚到底(纯键盘) → 点"我同意"
     log("[finalize] 条款页...")
@@ -501,7 +511,7 @@ async def browser_phone_and_finalize(page, profile, ctx=None, profile_id=None, s
             await asyncio.sleep(1)
         except Exception:
             pass
-        for sel in ['button:has-text("我同意")', 'button:has-text("I agree")']:
+        for sel in agree_sels:
             try:
                 b = page.locator(sel).last
                 if await b.count() and await b.is_visible():
