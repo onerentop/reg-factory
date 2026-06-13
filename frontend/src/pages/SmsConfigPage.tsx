@@ -40,7 +40,11 @@ export default function SmsConfigPage() {
 
   useEffect(() => {
     fetch('/api/config/gmail_sms_config').then(r => r.json()).then(res => {
-      if (res.data?.value) setGmailCfg(res.data.value)
+      if (res.data?.value) {
+        setGmailCfg(res.data.value)
+        // 复访时回填「国家」下拉，否则下拉为空看不到已存国家
+        if (res.data.value.provider) loadPrices(res.data.value.provider)
+      }
     }).catch(() => {})
   }, [])
 
