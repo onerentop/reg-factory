@@ -172,6 +172,38 @@ def test_register_google_passes_platform(client):
     assert captured.get("platform") == "google"
 
 
+def test_register_google_injects_sms_config(client):
+    from unittest.mock import AsyncMock, MagicMock
+    captured = {}
+    def fake_submit(**kwargs):
+        captured.update(kwargs)
+        return "tid"
+    fake_resp = MagicMock()
+    fake_resp.json.return_value = {"data": {"value": {"provider": "hero_sms", "country": "52", "max_price": "0.2", "fixed_price": False}}}
+    fake_client = AsyncMock()
+    fake_client.get = AsyncMock(return_value=fake_resp)
+    fake_ctx = MagicMock()
+    fake_ctx.__aenter__ = AsyncMock(return_value=fake_client)
+    fake_ctx.__aexit__ = AsyncMock(return_value=False)
+    with patch("gateway.routers.registration._pick_active_proxy", new_callable=AsyncMock, return_value=""), \
+         patch("gateway.routers.registration._httpx.AsyncClient", return_value=fake_ctx), \
+         patch("worker.process_manager.task_manager") as mock_tm:
+        mock_tm.submit.side_effect = fake_submit
+        r = client.post("/register/google", json={"count": 1})
+    assert r.status_code == 200
+    assert captured["config"]["sms"]["provider"] == "hero_sms"
+
+
+def test_register_google_sms_config_fetch_failure_does_not_block(client):
+    """config_service 挂掉/拉取异常时，注册仍应继续(静默兜底)。"""
+    with patch("gateway.routers.registration._httpx.AsyncClient", side_effect=Exception("conn refused")), \
+         patch("gateway.routers.registration._pick_active_proxy", new_callable=AsyncMock, return_value=""), \
+         patch("worker.process_manager.task_manager") as mock_tm:
+        mock_tm.submit.return_value = "tid"
+        r = client.post("/register/google", json={"count": 1})
+    assert r.status_code == 200
+
+
 # ──────────────────────────────────────────────
 # GET /tasks/{task_id}
 # ──────────────────────────────────────────────
