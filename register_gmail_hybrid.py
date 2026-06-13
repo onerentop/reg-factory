@@ -256,18 +256,30 @@ async def wait_phone_page(page, max_wait=240):
 # ======================== 浏览器手机验证 + 建号收尾 ========================
 
 def _svc_acquire(provider, country, max_price, fixed, service="go"):
-    """走 services sms_service 取号。返回 (phone, order_id) 或 (None, None)。"""
+    """走 services sms_service 取号。返回 (phone, order_id, error)；成功 error=None，
+    失败 error 带回 services 的真实原因(如 NO_BALANCE 余额不足)。"""
     import requests as _r
     try:
         resp = _r.post("http://localhost:8001/sms/number/acquire", json={
             "service": service, "country": str(country), "provider": provider,
             "max_price": str(max_price), "fixed_price": bool(fixed),
         }, timeout=30, proxies={"http": None, "https": None})
-        d = resp.json().get("data") or {}
-        return d.get("phone_number"), d.get("order_id")
+        body = resp.json()
+        d = body.get("data") or {}
+        ph = d.get("phone_number")
+        if ph:
+            return ph, d.get("order_id"), None
+        # 失败：FastAPI HTTPException → {detail}；ApiResponse → {message}
+        err = body.get("detail") or body.get("message") or f"HTTP {resp.status_code}"
+        return None, None, err
     except Exception as e:
-        log(f"  [svc-sms] acquire err: {e}", "WARN")
-        return None, None
+        return None, None, str(e)
+
+
+def _is_balance_error(err):
+    """判断取号错误是否为余额不足（接码平台没钱了，需充值）。"""
+    s = str(err or "").upper()
+    return any(k in s for k in ("NO_BALANCE", "BALANCE", "PAYMENT", "余额", "INSUFFICIENT"))
 
 
 def _svc_code(order_id, max_wait=180):
@@ -358,9 +370,14 @@ async def browser_phone_and_finalize(page, profile, ctx=None, profile_id=None, s
             if use_svc:
                 _ctag = f"{cur_name} {cur_country} ${cur_price}" if auto_probe else f"国家={cur_country}"
                 log(f"[sms] 取号 services({svc_provider}, {_ctag}, 第 {attempt}/{max_tries})...")
-                _ph, _oid = _svc_acquire(svc_provider, cur_country, svc_maxprice, svc_fixed, service=hero_svc)
+                _ph, _oid, _err = _svc_acquire(svc_provider, cur_country, svc_maxprice, svc_fixed, service=hero_svc)
                 if not _ph:
-                    raise RuntimeError("services 取号无号")
+                    if _is_balance_error(_err):
+                        log(f"[sms] ⚠️ 接码平台余额不足，请充值后再试! ({_err})", "WARN")
+                        if auto_probe and probe is not None:
+                            probe_save(probe)
+                        return None
+                    raise RuntimeError(f"services 取号无号: {_err}")
                 pkey = f"svc_{_oid}"
                 e164, _ = P._split_intl_phone(_ph)
                 log(f"[sms] 号(svc): {e164}")
