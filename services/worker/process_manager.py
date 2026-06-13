@@ -115,6 +115,14 @@ def _worker_process(task_id: str, idx: int, proxy: str, config: dict, redis_url:
 
     # 执行注册
     async def _run():
+        import asyncio as _aio
+        # 并发错开启动：第 idx 个任务延迟，避开多 ixBrowser 窗口同时创建/warming
+        # 的资源竞争峰值。WebSearch 证实 stagger startup 是并发浏览器自动化标准做法
+        # (无错开 >8 实例崩溃率 >43%)；注册是重流程，用秒级(默认 8s/任务)而非毫秒级。
+        _stagger = (config or {}).get("stagger_seconds", 8)
+        if idx > 0 and _stagger > 0:
+            print(f"[process#{idx}] 并发错开，等 {idx * _stagger}s 再启动")
+            await _aio.sleep(idx * _stagger)
         from worker.step_engine import FlowRegistry
         flow = FlowRegistry.get("outlook")
         context = {"idx": idx, "proxy": proxy, **(config or {})}
