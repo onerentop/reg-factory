@@ -718,6 +718,16 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False, prox
         print(f"  {tag} registering: {email}")
 
         # Step 1: Enter email
+        # 先等 signup 页 email 框出现：warming/导航后慢网络/代理(尤其并发)页面加载
+        # 需要时间，不能第一次没找到就放弃(之前 email input not found 多为加载未完成误判)
+        _ei = page.locator(
+            'input[type="email"], input[name="MemberName"], input[id="MemberName"], '
+            'input[id="usernameInput"], input[name="Username"]'
+        ).first
+        for _ in range(25):
+            if await _safe_count(_ei) > 0:
+                break
+            await asyncio.sleep(1)
         email_ok = False
         for retry in range(5):
             email_input = page.locator(
