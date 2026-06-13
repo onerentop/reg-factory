@@ -1,4 +1,6 @@
 import asyncio
+import json
+from typing import Any
 
 import httpx
 
@@ -65,3 +67,14 @@ class SmsActivateProvider(SMSProvider):
 
     async def cancel(self, order_id: str) -> None:
         await self._request({"action": "setStatus", "id": order_id, "status": "8"})
+
+    async def get_prices(self, service: str) -> list[dict[str, Any]]:
+        text = await self._request({"action": "getPrices", "service": service})
+        data = json.loads(text) if text.strip().startswith("{") else {}
+        rows = []
+        for cid, svc in data.items():
+            info = svc.get(service) if isinstance(svc, dict) else None
+            if info and "cost" in info:
+                rows.append({"country": str(cid), "cost": float(info["cost"]), "count": int(info.get("count", 0))})
+        rows.sort(key=lambda r: r["cost"])
+        return rows

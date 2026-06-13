@@ -62,6 +62,10 @@ class SMSProvider(ABC):
     async def get_countries(self) -> list[dict[str, Any]]:
         return []
 
+    async def get_prices(self, service: str) -> list[dict[str, Any]]:
+        """返回该 service 各国价格/库存：[{country, country_name?, cost, count}]，按 cost 升序。"""
+        return []
+
 
 class ProviderRegistry:
     """适配器注册表。工厂模式——按名称创建 Provider 实例。"""
