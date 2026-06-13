@@ -637,7 +637,7 @@ async def _safe_visible(locator):
         return False
 
 
-async def register_outlook(page, context, idx=0, captcha_early_abort=False):
+async def register_outlook(page, context, idx=0, captcha_early_abort=False, proxy_str=None):
     """
     Register a new Outlook email account.
     Returns (email, password) on success, (None, None) on failure.
@@ -1501,6 +1501,33 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False):
         except Exception as e:
             print(f"  {tag} [graph] extraction error: {e}")
 
+        # 浏览器 OAuth 版没拿到 token → 纯 HTTP 兜底(extract_graph_tokens.get_graph_token,
+        # 无浏览器无导航崩溃)。用注册时的代理(socks5h 远端 DNS)保持出口 IP 一致，
+        # 避免新账号换 IP 触发风控。
+        if not graph or not graph.get("refresh_token"):
+            try:
+                import os as _os
+                from extract_graph_tokens import get_graph_token
+                _saved = {k: _os.environ.get(k) for k in ("HTTP_PROXY", "HTTPS_PROXY")}
+                if proxy_str:
+                    _p = proxy_str.replace("socks5://", "socks5h://")
+                    _os.environ["HTTP_PROXY"] = _p
+                    _os.environ["HTTPS_PROXY"] = _p
+                try:
+                    print(f"  {tag} [graph] 浏览器版未拿到 token，HTTP 兜底...")
+                    _hg = await asyncio.to_thread(get_graph_token, email, password, idx)
+                finally:
+                    for _k, _v in _saved.items():
+                        if _v is None:
+                            _os.environ.pop(_k, None)
+                        else:
+                            _os.environ[_k] = _v
+                if _hg and _hg.get("refresh_token"):
+                    graph = _hg
+                    print(f"  {tag} [graph] HTTP 兜底成功")
+            except Exception as e:
+                print(f"  {tag} [graph] HTTP 兜底失败: {e}")
+
         print(f"  {tag} OK: {email} / {password}")
         return email, password, graph  # 调用方用 result = await register_outlook(...)，result[2] = graph
 
@@ -1903,7 +1930,7 @@ async def _register_one_headless(idx, proxy_str):
             await page.route("**/*", _block_heavy_resources)
 
             # Abort early when captcha solvers fail so auto-mode falls back to ixBrowser fast
-            result = await register_outlook(page, context, idx, captcha_early_abort=True)
+            result = await register_outlook(page, context, idx, captcha_early_abort=True, proxy_str=proxy_str)
             email = result[0] if result else None
             password = result[1] if result and len(result) > 1 else None
             graph = result[2] if result and len(result) > 2 else None
@@ -2029,7 +2056,7 @@ async def _register_one_browser(bb, idx, proxy_str):
             # NOTE: resource blocking intentionally disabled in browser mode.
             # PerimeterX behavioral analysis can detect modified network patterns.
             # Bandwidth saving via resource blocking only applies in headless mode.
-            result = await register_outlook(page, context, idx)
+            result = await register_outlook(page, context, idx, proxy_str=proxy_str)
             email = result[0] if result else None
             password = result[1] if result and len(result) > 1 else None
             graph = result[2] if result and len(result) > 2 else None
