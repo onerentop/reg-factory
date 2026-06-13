@@ -459,7 +459,6 @@ export default function AccountsPage() {
                 onChange={setRegisterMode}
                 options={[
                   { value: 'browser', label: '浏览器模式（稳定）' },
-                  { value: 'hybrid', label: '混合模式（浏览器解码+协议提交）' },
                   { value: 'protocol', label: '纯协议（实验）' },
                 ]}
               />

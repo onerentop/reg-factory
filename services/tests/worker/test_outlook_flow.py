@@ -22,19 +22,6 @@ def test_get_steps_are_legacy_kind():
     assert all(s.kind == "legacy" for s in steps)
 
 
-def test_mode_hybrid_dispatches(monkeypatch):
-    called = {}
-    async def fake_hybrid(proxy_str, idx):
-        called["mode"] = "hybrid"; return ("h@outlook.com", "Pw!", "rt")
-    monkeypatch.setitem(sys.modules, "outlook_hybrid",
-                        _fake_module("outlook_hybrid", register_outlook_hybrid=fake_hybrid))
-    flow = _make_flow()
-    ctx = {"mode": "hybrid", "proxy": "p", "idx": 0}
-    res = asyncio.run(flow._step_register(ctx, None))
-    assert called["mode"] == "hybrid" and res.success is True
-    assert ctx["email"] == "h@outlook.com" and ctx["refresh_token"] == "rt"
-
-
 def test_mode_protocol_dispatches(monkeypatch):
     called = {}
     def fake_protocol(proxy_str=None, idx=0):

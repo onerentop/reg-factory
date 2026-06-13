@@ -30,13 +30,7 @@ class OutlookRegistrationFlow(RegistrationFlow):
         mode = context.get("mode", "browser")
         email = password = graph_token = None
 
-        if mode == "hybrid":
-            from outlook_hybrid import register_outlook_hybrid
-            result = await register_outlook_hybrid(proxy_str, idx)
-            if result and result[0]:
-                email, password = result[0], result[1]
-                graph_token = result[2] if len(result) > 2 else None
-        elif mode == "protocol":
+        if mode == "protocol":
             from register_outlook_standalone import register_outlook_protocol
             result = register_outlook_protocol(proxy_str, idx)
             if result and result[0]:
