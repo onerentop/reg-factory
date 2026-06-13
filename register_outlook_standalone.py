@@ -685,7 +685,7 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False, prox
                     '#iNext', '#iAgree', '#acceptButton',
                 ]:
                     btn = page.locator(sel).first
-                    if await btn.count() > 0:
+                    if await _safe_count(btn) > 0:
                         try:
                             await btn.click(timeout=5000)
                             print(f"  {tag} clicked consent: {sel}")
@@ -724,7 +724,7 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False, prox
                 'input[type="email"], input[name="MemberName"], input[id="MemberName"], '
                 'input[id="usernameInput"], input[name="Username"]'
             ).first
-            if await email_input.count() == 0:
+            if await _safe_count(email_input) == 0:
                 print(f"  {tag} email input not found")
                 await page.screenshot(path=f"{SCREENSHOT_DIR}/outlook_{idx}_no_email.png")
                 return None, None
@@ -732,7 +732,7 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False, prox
             domain_dropdown = page.locator(
                 'select[id="LiveDomainBoxList"], select[name="LiveDomainBoxList"], #LiveDomainBoxList'
             ).first
-            has_domain_dropdown = await domain_dropdown.count() > 0
+            has_domain_dropdown = await _safe_count(domain_dropdown) > 0
 
             await email_input.fill("")
             await asyncio.sleep(0.3)
@@ -750,7 +750,7 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False, prox
             await asyncio.sleep(0.5)
             for sel in ['input[type="submit"]', 'button[type="submit"]', '#iSignupAction', 'button[id="iSignupAction"]']:
                 btn = page.locator(sel).first
-                if await btn.count() > 0:
+                if await _safe_count(btn) > 0:
                     await btn.click(timeout=3000)
                     break
             await asyncio.sleep(3)
@@ -806,7 +806,7 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False, prox
                         'button:has-text("Next")', 'button:has-text("next")',
                         'button:has-text("下一步")', 'button:has-text("Suivant")']:
                 btn = page.locator(sel).first
-                if await btn.count() > 0:
+                if await _safe_count(btn) > 0:
                     try:
                         await btn.click(timeout=3000)
                         clicked_next = True
@@ -852,7 +852,7 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False, prox
         print(f"  {tag} form elements: {json.dumps(form_debug, ensure_ascii=False)[:600]}")
 
         all_selects = page.locator('select')
-        select_count = await all_selects.count()
+        select_count = await _safe_count(all_selects)
         print(f"  {tag} found {select_count} select elements")
 
         if select_count >= 2:
@@ -876,7 +876,7 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False, prox
                 'input[id*="Year"], input[id*="year"], input[name*="Year"], '
                 'input[name*="year"], input[type="text"]'
             ).first
-            if await year_input.count() > 0:
+            if await _safe_count(year_input) > 0:
                 await year_input.fill(str(year))
         else:
             # New UI with combobox/dropdown (Chinese or English)
@@ -896,7 +896,7 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False, prox
 
             # Find all visible comboboxes
             combos = page.locator('button[role="combobox"], [role="combobox"]')
-            combo_count = await combos.count()
+            combo_count = await _safe_count(combos)
             print(f"  {tag} found {combo_count} comboboxes")
 
             # Strategy: identify combos by their text/aria-label/position
@@ -975,7 +975,7 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False, prox
                         day_opt = None
                         try:
                             all_opts = page.locator('[role="option"]')
-                            opt_count = await all_opts.count()
+                            opt_count = await _safe_count(all_opts)
                             for oi in range(opt_count):
                                 opt_text = (await all_opts.nth(oi).text_content() or "").strip()
                                 if opt_text == day_str or opt_text == f"{day}日":
@@ -985,9 +985,9 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False, prox
                             pass
                         if not day_opt:
                             day_opt = page.locator(f'[role="option"]:has-text("{day}日")').first
-                        if not day_opt or await day_opt.count() == 0:
+                        if not day_opt or await _safe_count(day_opt) == 0:
                             day_opt = page.locator(f'[role="option"]:has-text("{day_str}")').first
-                        if await day_opt.count() > 0:
+                        if await _safe_count(day_opt) > 0:
                             await day_opt.click()
                             day_filled = True
                             print(f"  {tag} day: {day}")
@@ -1010,15 +1010,15 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False, prox
                 'input[type="text"][inputmode="numeric"], input[type="number"]'
             ).first
             # Fallback: find the text input that's NOT already filled
-            if await year_input.count() == 0:
+            if await _safe_count(year_input) == 0:
                 all_text = page.locator('input[type="text"]')
-                for ti in range(await all_text.count()):
+                for ti in range(await _safe_count(all_text)):
                     inp = all_text.nth(ti)
                     val = await inp.input_value()
                     if not val:  # empty text input = likely year
                         year_input = inp
                         break
-            if await year_input.count() > 0:
+            if await _safe_count(year_input) > 0:
                 await year_input.fill(str(year))
                 print(f"  {tag} year: {year}")
 
@@ -1028,7 +1028,7 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False, prox
                     'button:has-text("Next")', 'button:has-text("next")',
                     'button:has-text("Suivant")']:
             btn = page.locator(sel).first
-            if await btn.count() > 0:
+            if await _safe_count(btn) > 0:
                 await btn.click(timeout=3000)
                 print(f"  {tag} clicked next (bday): {sel}")
                 break
@@ -1198,7 +1198,7 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False, prox
                 for sel in ['a:has-text("Skip")', 'button:has-text("Skip")', 'a:has-text("No thanks")',
                             'button:has-text("No thanks")', 'button:has-text("Cancel")', '#skipBtn']:
                     btn = page.locator(sel).first
-                    if await btn.count() > 0:
+                    if await _safe_count(btn) > 0:
                         try:
                             await btn.click(timeout=3000)
                             break
@@ -1222,7 +1222,7 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False, prox
                 await asyncio.sleep(2)
                 for label in ['OK', 'Accept', 'Continue', 'Next', 'I agree', 'Got it']:
                     btn = page.locator(f'button:has-text("{label}"), input[value="{label}"], a:has-text("{label}")').first
-                    if await btn.count() > 0:
+                    if await _safe_count(btn) > 0:
                         try:
                             await btn.click(timeout=3000)
                             break
@@ -1255,7 +1255,7 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False, prox
                 ]:
                     try:
                         hold_btn = page.locator(hold_sel).first
-                        if await hold_btn.count() > 0:
+                        if await _safe_count(hold_btn) > 0:
                             target_box = await hold_btn.bounding_box()
                             if target_box and target_box['width'] > 30:
                                 print(f"  {tag} found main-page hold button: {hold_sel}")
@@ -1268,7 +1268,7 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False, prox
                 if not target_box:
                     try:
                         hs_iframes = page.locator('iframe[src*="hsprotect.net"]')
-                        for hi in range(await hs_iframes.count()):
+                        for hi in range(await _safe_count(hs_iframes)):
                             box = await hs_iframes.nth(hi).bounding_box()
                             if box and box['width'] > 50 and box['height'] > 30:
                                 target_box = box
@@ -1281,7 +1281,7 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False, prox
                         for f in page.frames:
                             if 'hsprotect.net' in (f.url or '') and 'ch_ctx' in (f.url or ''):
                                 px = f.locator('#px-captcha')
-                                if await px.count() > 0:
+                                if await _safe_count(px) > 0:
                                     target_box = await px.bounding_box()
                                     break
                     except Exception:
@@ -1340,7 +1340,7 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False, prox
                                 continue
                             try:
                                 btns = f.locator('button, [role="button"], input[type="button"], input[type="submit"]')
-                                for bi in range(await btns.count()):
+                                for bi in range(await _safe_count(btns)):
                                     box = await btns.nth(bi).bounding_box()
                                     if box and box['width'] > 30 and box['height'] > 20:
                                         x = box['x'] + box['width'] / 2
@@ -1368,7 +1368,7 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False, prox
             if press_count < max_press and no_btn_rounds >= 3:
                 try:
                     main_btns = page.locator('#hipTemplateContainer button, #HipPaneForm button, [id*="hip"] button')
-                    for bi in range(await main_btns.count()):
+                    for bi in range(await _safe_count(main_btns)):
                         box = await main_btns.nth(bi).bounding_box()
                         if box and box['width'] > 20:
                             press_count += 1
@@ -1384,7 +1384,7 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False, prox
                 try:
                     for sel in ['#iSignupAction', 'input[type="submit"]', 'button[type="submit"]']:
                         submit = page.locator(sel).first
-                        if await submit.count() > 0 and await submit.is_visible():
+                        if await _safe_count(submit) > 0 and await submit.is_visible():
                             await submit.click(timeout=3000)
                             await asyncio.sleep(5)
                             break
@@ -1482,7 +1482,7 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False, prox
                 break
             for label in ['OK', 'Accept', 'Continue', 'Next', 'I agree', 'Got it', 'Agree']:
                 btn = page.locator(f'button:has-text("{label}"), input[value="{label}"], a:has-text("{label}")').first
-                if await btn.count() > 0:
+                if await _safe_count(btn) > 0:
                     try:
                         await btn.click(timeout=3000)
                         break
