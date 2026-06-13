@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Table, Tag, Button, Modal, Form, Input, Switch, InputNumber, message, Spin, Card, Select } from 'antd'
+import { Table, Tag, Button, Modal, Form, Input, Switch, InputNumber, message, Spin, Card, Select, Space } from 'antd'
 import { EditOutlined, DollarOutlined } from '@ant-design/icons'
 
 interface Provider {
@@ -26,6 +26,7 @@ export default function SmsConfigPage() {
   const [form] = Form.useForm()
   const [gmailCfg, setGmailCfg] = useState<{provider:string;country:string;max_price:string;fixed_price:boolean}>({ provider: 'hero_sms', country: '', max_price: '0.2', fixed_price: false })
   const [gmailPrices, setGmailPrices] = useState<{country:string;cost:number;count:number;country_name?:string}[]>([])
+  const [gmailOffers, setGmailOffers] = useState<{prices:any;counts:any;tiers:{price:number;count:number}[]}>({ prices: {}, counts: {}, tiers: [] })
 
   useEffect(() => {
     Promise.all([
@@ -42,8 +43,11 @@ export default function SmsConfigPage() {
     fetch('/api/config/gmail_sms_config').then(r => r.json()).then(res => {
       if (res.data?.value) {
         setGmailCfg(res.data.value)
-        // 复访时回填「国家」下拉，否则下拉为空看不到已存国家
-        if (res.data.value.provider) loadPrices(res.data.value.provider)
+        // 复访时回填「国家」下拉 + 价位档，否则下拉/价位为空看不到已存配置
+        if (res.data.value.provider) {
+          loadPrices(res.data.value.provider)
+          if (res.data.value.country) loadOffers(res.data.value.provider, res.data.value.country)
+        }
       }
     }).catch(() => {})
   }, [])
@@ -51,6 +55,13 @@ export default function SmsConfigPage() {
   const loadPrices = (provider: string) => {
     fetch(`/api/sms/providers/${provider}/prices?service=go`).then(r => r.json())
       .then(res => setGmailPrices(res.data || [])).catch(() => setGmailPrices([]))
+  }
+
+  const emptyOffers = { prices: {}, counts: {}, tiers: [] }
+  const loadOffers = (provider: string, country: string) => {
+    if (!country) { setGmailOffers(emptyOffers); return }
+    fetch(`/api/sms/providers/${provider}/offers?service=go&country=${country}`).then(r => r.json())
+      .then(res => setGmailOffers(res.data?.tiers ? res.data : emptyOffers)).catch(() => setGmailOffers(emptyOffers))
   }
 
   const saveGmailCfg = () => {
@@ -140,18 +151,35 @@ export default function SmsConfigPage() {
         <Form layout="inline">
           <Form.Item label="平台">
             <Select style={{ width: 140 }} value={gmailCfg.provider}
-              onChange={(v) => { setGmailCfg({ ...gmailCfg, provider: v }); loadPrices(v) }}
+              onChange={(v) => { setGmailCfg({ ...gmailCfg, provider: v }); loadPrices(v); loadOffers(v, gmailCfg.country) }}
               options={providers.map(p => ({ value: p.name, label: p.display_name || p.name }))} />
           </Form.Item>
           <Form.Item label="国家">
             <Select style={{ width: 220 }} value={gmailCfg.country} showSearch
-              onChange={(v) => { const row = gmailPrices.find(r => r.country === v); setGmailCfg({ ...gmailCfg, country: v, max_price: row ? String(row.cost) : gmailCfg.max_price }) }}
+              onChange={(v) => { const row = gmailPrices.find(r => r.country === v); setGmailCfg({ ...gmailCfg, country: v, max_price: row ? String(row.cost) : gmailCfg.max_price }); loadOffers(gmailCfg.provider, v) }}
               options={gmailPrices.map(r => ({ value: r.country, label: `${r.country_name || r.country} / ${r.cost} / 库存${r.count}` }))} />
           </Form.Item>
           <Form.Item label="价格上限"><InputNumber min={0} step={0.1} value={Number(gmailCfg.max_price)} onChange={(v) => setGmailCfg({ ...gmailCfg, max_price: String(v ?? 0) })} /></Form.Item>
           <Form.Item label="固定价格"><Switch checked={gmailCfg.fixed_price} onChange={(v) => setGmailCfg({ ...gmailCfg, fixed_price: v })} /></Form.Item>
           <Button type="primary" onClick={saveGmailCfg}>保存</Button>
         </Form>
+        {gmailOffers.tiers.length > 0 && (
+          <div style={{ marginTop: 16 }}>
+            <div style={{ marginBottom: 8, color: '#888', fontSize: 13 }}>
+              价位档（点击选用 → 自动填入价格上限并开启固定价格）
+              总库存 {gmailOffers.counts?.total ?? '-'} · 物理号 {gmailOffers.counts?.physical ?? '-'} · 最低价 {gmailOffers.prices?.min ?? '-'}
+            </div>
+            <Space wrap size={[8, 8]}>
+              {gmailOffers.tiers.map(t => (
+                <Tag.CheckableTag key={t.price}
+                  checked={Number(gmailCfg.max_price) === t.price && gmailCfg.fixed_price}
+                  onChange={() => setGmailCfg({ ...gmailCfg, max_price: String(t.price), fixed_price: true })}>
+                  ${t.price} / {t.count}个
+                </Tag.CheckableTag>
+              ))}
+            </Space>
+          </div>
+        )}
       </Card>
 
       <Modal title={`配置 ${editingProvider}`} open={editVisible} onOk={saveConfig} onCancel={() => setEditVisible(false)}>
