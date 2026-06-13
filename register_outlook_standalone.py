@@ -787,16 +787,16 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False, prox
         # Step 2: Enter password
         await asyncio.sleep(2)
         pwd_input = None
-        for _ in range(10):
+        for _ in range(25):   # 10→25：并发跑多个窗口时页面加载更慢，给更多时间等密码页
             pwd_input = page.locator(
                 'input[type="password"], input[name="Password"], '
                 'input[id="PasswordInput"], input[name="passwd"]'
             ).first
-            if await pwd_input.count() > 0:
+            if await _safe_count(pwd_input) > 0:
                 break
             await asyncio.sleep(1)
 
-        if pwd_input and await pwd_input.count() > 0:
+        if pwd_input and await _safe_count(pwd_input) > 0:
             await pwd_input.fill(password)
             print(f"  {tag} password filled")
             await asyncio.sleep(0.5)
