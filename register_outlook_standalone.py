@@ -1208,6 +1208,13 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False, prox
                 await page.screenshot(path=f"{SCREENSHOT_DIR}/outlook_{idx}_blocked.png")
                 return None, None
 
+            # 临时错误页(服务端/风控): "We ran into a problem. Please try again"
+            # → 放弃换 IP 重试，不在 captcha 循环里死等(上次死等 105s)
+            if "ran into a problem" in page_text or "problem aufgetreten" in page_text:
+                print(f"  {tag} TEMP ERROR: We ran into a problem — 放弃换 IP")
+                await page.screenshot(path=f"{SCREENSHOT_DIR}/outlook_{idx}_temp_error.png")
+                return None, None
+
             # FIDO/passkey - skip
             if "fido" in current_url or "passkey" in current_url:
                 for sel in ['a:has-text("Skip")', 'button:has-text("Skip")', 'a:has-text("No thanks")',
