@@ -40,10 +40,13 @@ class SmsActivateProvider(SMSProvider):
             return float(text.split(":")[1])
         raise ValueError(f"{self.name} getBalance failed: {text}")
 
-    async def get_number(self, service: str, country: str) -> AcquireResult:
-        text = await self._request({
-            "action": "getNumber", "service": service, "country": country,
-        })
+    async def get_number(self, service: str, country: str, max_price: str = "0", fixed_price: bool = False) -> AcquireResult:
+        params = {"action": "getNumber", "service": service, "country": country}
+        if max_price and str(max_price) not in ("0", "0.0", ""):
+            params["maxPrice"] = str(max_price)
+            if fixed_price:
+                params["fixedPrice"] = "true"
+        text = await self._request(params)
         if not text.startswith("ACCESS_NUMBER"):
             raise ValueError(f"{self.name} getNumber failed: {text}")
         parts = text.split(":")

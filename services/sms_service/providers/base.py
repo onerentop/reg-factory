@@ -41,7 +41,7 @@ class SMSProvider(ABC):
         ...
 
     @abstractmethod
-    async def get_number(self, service: str, country: str) -> AcquireResult:
+    async def get_number(self, service: str, country: str, max_price: str = "0", fixed_price: bool = False) -> AcquireResult:
         ...
 
     @abstractmethod

@@ -89,7 +89,7 @@ async def get_prices(name: str, service: str = "go", svc: SmsService = Depends(g
 async def acquire_number(body: AcquireRequest, service: SmsService = Depends(get_service)):
     from fastapi import HTTPException
     try:
-        result = await service.acquire_number(body.service, body.country, body.provider)
+        result = await service.acquire_number(body.service, body.country, body.provider, body.max_price, body.fixed_price)
         return ApiResponse(data={"order_id": result.order_id, "phone_number": result.phone_number, "provider": result.provider})
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

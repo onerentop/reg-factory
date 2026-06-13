@@ -47,16 +47,10 @@ class SmsCloudProvider(SMSProvider):
         data = await self._get("/public/sms/balance")
         return float(data.get("balance", 0))
 
-    async def get_number(self, service: str, country: str) -> AcquireResult:
-        data = await self._get("/public/sms/getNumber", {
-            "serviceCode": service,
-            "countryCode": country,
-        })
-        return AcquireResult(
-            order_id=str(data["id"]),
-            phone_number=data["phoneNumber"],
-            provider=self.name,
-        )
+    async def get_number(self, service: str, country: str, max_price: str = "0", fixed_price: bool = False) -> AcquireResult:
+        # smscloud getNumber 不支持价格过滤（价格在 inventory 层）；max_price/fixed_price 仅为签名兼容
+        data = await self._get("/public/sms/getNumber", {"serviceCode": service, "countryCode": country})
+        return AcquireResult(order_id=str(data["id"]), phone_number=data["phoneNumber"], provider=self.name)
 
     async def get_code(self, order_id: str, timeout: int = 120) -> CodeResult:
         elapsed = 0

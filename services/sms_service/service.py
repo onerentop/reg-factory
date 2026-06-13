@@ -49,14 +49,15 @@ class SmsService:
         return await provider.get_prices(service)
 
     async def acquire_number(
-        self, service: str, country: str, provider_name: str | None = None
+        self, service: str, country: str, provider_name: str | None = None,
+        max_price: str = "0", fixed_price: bool = False,
     ) -> AcquireResult:
         if provider_name:
             provider = await self._get_provider(provider_name)
         else:
             provider = await self._select_best_provider()
 
-        result = await provider.get_number(service, country)
+        result = await provider.get_number(service, country, max_price=max_price, fixed_price=fixed_price)
         await self._order_repo.create(
             provider=provider.name,
             service=service,

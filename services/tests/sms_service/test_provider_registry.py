@@ -16,7 +16,7 @@ class TestProvider(SMSProvider):
     async def get_balance(self) -> float:
         return 99.99
 
-    async def get_number(self, service: str, country: str) -> AcquireResult:
+    async def get_number(self, service: str, country: str, max_price: str = "0", fixed_price: bool = False) -> AcquireResult:
         return AcquireResult(order_id="test-123", phone_number="+1234567890", provider="test_provider")
 
     async def get_code(self, order_id: str, timeout: int = 120) -> CodeResult:

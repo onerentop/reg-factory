@@ -13,6 +13,8 @@ class AcquireRequest(BaseModel):
     service: str = Field(min_length=1)
     country: str = Field(min_length=1)
     provider: str | None = None
+    max_price: str = "0"
+    fixed_price: bool = False
 
 
 class AcquireResponse(BaseModel):

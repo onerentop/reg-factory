@@ -29,7 +29,7 @@ class FakeSmsService:
             return BalanceResponse(provider=provider_name, balance=99.5)
         raise ValueError(f"Platform '{provider_name}' not configured")
 
-    async def acquire_number(self, service: str, country: str, provider: str | None = None) -> AcquireResult:
+    async def acquire_number(self, service: str, country: str, provider: str | None = None, max_price: str = "0", fixed_price: bool = False) -> AcquireResult:
         if provider == "badprovider":
             raise ValueError("No enabled SMS platforms")
         return AcquireResult(order_id="order-001", phone_number="+79001234567", provider="smsactivate")

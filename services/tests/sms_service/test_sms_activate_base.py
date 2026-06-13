@@ -69,6 +69,7 @@ async def test_get_number_parses(monkeypatch):
     assert q["action"] == "getNumber"
     assert q["service"] == "tg"
     assert q["country"] == "0"
+    assert "maxPrice" not in q
 
 
 async def test_get_number_error_raises(monkeypatch):
