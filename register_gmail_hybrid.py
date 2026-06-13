@@ -190,14 +190,27 @@ async def drive_to_phone(page, profile):
             await page.reload(wait_until="domcontentloaded", timeout=30000)
             await asyncio.sleep(3)
 
-    # ---- 用户名（两变体：输入框 / 选择列表）----
+    # ---- 用户名（两变体：输入框 / 选择列表；多候选选择器兼容 Google A/B 页面）----
+    # name=Username 是常见变体，但有的页面用 aria-label/autocomplete，故多候选兜底。
+    username_sels = [
+        'input[name=Username]',
+        'input[aria-label*="用户名"]',
+        'input[aria-label*="username" i]',
+        'input[autocomplete="username"]',
+        'input[type=text]',
+    ]
     await wait_url(page, "username", 25)
     await asyncio.sleep(1.5)
     for uname_try in range(4):
         if not await _on_page(page, "username"):
             break
-        # 选择变体：先点"创建您自己的 Gmail 邮箱"单选，露出输入框
-        if not await is_visible(page, 'input[name=Username]', 1.5):
+        # 输入框已可见则直接填；不可见(选择列表变体)则先点"创建您自己的"露出输入框
+        _has_input = False
+        for _s in username_sels[:4]:
+            if await is_visible(page, _s, 1.0):
+                _has_input = True
+                break
+        if not _has_input:
             for sel in ['div[role=radio]:has-text("创建")', 'text=创建您自己的',
                         '[role=radio]:last-child', '[role=radio]']:
                 try:
@@ -209,7 +222,7 @@ async def drive_to_phone(page, profile):
                 except Exception:
                     continue
         uname = f"{first.lower()}{last.lower()}{random.randint(1000, 99999)}"
-        if await fill_first(page, ['input[name=Username]'], uname, 6000):
+        if await fill_first(page, username_sels, uname, 6000):
             profile["username"] = uname
             await click_next(page)
             log(f"[browser] 用户名 {uname} 已提交")
