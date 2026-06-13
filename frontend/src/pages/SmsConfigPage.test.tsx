@@ -28,7 +28,7 @@ describe('SmsConfigPage smoke', () => {
   it('renders providers table', async () => {
     renderWithProviders(<SmsConfigPage />)
     await waitFor(() => {
-      expect(screen.getByRole('table')).toBeInTheDocument()
+      expect(screen.getAllByRole('table').length).toBeGreaterThanOrEqual(1)
     })
   })
 })

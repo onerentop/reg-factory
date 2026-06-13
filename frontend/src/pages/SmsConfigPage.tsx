@@ -24,9 +24,10 @@ export default function SmsConfigPage() {
   const [editingProvider, setEditingProvider] = useState<string>('')
   const [balances, setBalances] = useState<Record<string, number>>({})
   const [form] = Form.useForm()
-  const [gmailCfg, setGmailCfg] = useState<{provider:string;country:string;max_price:string;fixed_price:boolean}>({ provider: 'hero_sms', country: '', max_price: '0.2', fixed_price: false })
+  const [gmailCfg, setGmailCfg] = useState<{provider:string;country:string;max_price:string;fixed_price:boolean;auto_probe:boolean}>({ provider: 'hero_sms', country: '', max_price: '0.2', fixed_price: false, auto_probe: false })
   const [gmailPrices, setGmailPrices] = useState<{country:string;cost:number;count:number;country_name?:string}[]>([])
   const [gmailOffers, setGmailOffers] = useState<{prices:any;counts:any;tiers:{price:number;count:number}[]}>({ prices: {}, counts: {}, tiers: [] })
+  const [gmailAvail, setGmailAvail] = useState<{country:string;name:string;price:number;last_ok:number}[]>([])
 
   useEffect(() => {
     Promise.all([
@@ -42,7 +43,7 @@ export default function SmsConfigPage() {
   useEffect(() => {
     fetch('/api/config/gmail_sms_config').then(r => r.json()).then(res => {
       if (res.data?.value) {
-        setGmailCfg(res.data.value)
+        setGmailCfg(prev => ({ ...prev, ...res.data.value }))
         // 复访时回填「国家」下拉 + 价位档，否则下拉/价位为空看不到已存配置
         if (res.data.value.provider) {
           loadPrices(res.data.value.provider)
@@ -50,6 +51,11 @@ export default function SmsConfigPage() {
         }
       }
     }).catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    fetch('/api/config/gmail_country_probe').then(r => r.json())
+      .then(res => setGmailAvail(res.data?.value?.available || [])).catch(() => {})
   }, [])
 
   const loadPrices = (provider: string) => {
@@ -73,6 +79,19 @@ export default function SmsConfigPage() {
       if (res.success === false) message.error(res.message || '保存失败')
       else message.success('已保存')
     }).catch(() => message.error('保存失败'))
+  }
+
+  const removeAvail = (country: string) => {
+    const next = gmailAvail.filter(a => a.country !== country)
+    setGmailAvail(next)
+    fetch('/api/config/gmail_country_probe').then(r => r.json()).then(res => {
+      const probe = res.data?.value || { available: [], failed: {} }
+      probe.available = next
+      fetch('/api/config/gmail_country_probe', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: 'gmail_country_probe', value: probe }),
+      })
+    }).catch(() => {})
   }
 
   const checkBalance = async (name: string) => {
@@ -161,6 +180,7 @@ export default function SmsConfigPage() {
           </Form.Item>
           <Form.Item label="价格上限"><InputNumber min={0} step={0.1} value={Number(gmailCfg.max_price)} onChange={(v) => setGmailCfg({ ...gmailCfg, max_price: String(v ?? 0) })} /></Form.Item>
           <Form.Item label="固定价格"><Switch checked={gmailCfg.fixed_price} onChange={(v) => setGmailCfg({ ...gmailCfg, fixed_price: v })} /></Form.Item>
+          <Form.Item label="自动探测国家"><Switch checked={gmailCfg.auto_probe} onChange={(v) => setGmailCfg({ ...gmailCfg, auto_probe: v })} /></Form.Item>
           <Button type="primary" onClick={saveGmailCfg}>保存</Button>
         </Form>
         {gmailOffers.tiers.length > 0 && (
@@ -180,6 +200,17 @@ export default function SmsConfigPage() {
             </Space>
           </div>
         )}
+        <div style={{ marginTop: 16 }}>
+          <div style={{ marginBottom: 8, color: '#888', fontSize: 13 }}>可用国家库（注册时按价优先复用，验证失败会自动移入冷却；可手动删除变烂的）</div>
+          <Table rowKey="country" size="small" pagination={false}
+            dataSource={gmailAvail}
+            columns={[
+              { title: '国家', dataIndex: 'name', key: 'name', render: (n: string, r: any) => n || r.country },
+              { title: '价格', dataIndex: 'price', key: 'price' },
+              { title: '上次验证', dataIndex: 'last_ok', key: 'last_ok', render: (t: number) => t ? new Date(t * 1000).toLocaleString() : '-' },
+              { title: '操作', key: 'op', render: (_: any, r: any) => <Button type="link" danger size="small" onClick={() => removeAvail(r.country)}>删除</Button> },
+            ]} />
+        </div>
       </Card>
 
       <Modal title={`配置 ${editingProvider}`} open={editVisible} onOk={saveConfig} onCancel={() => setEditVisible(false)}>
