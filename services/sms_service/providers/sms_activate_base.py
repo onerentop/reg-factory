@@ -74,10 +74,29 @@ class SmsActivateProvider(SMSProvider):
     async def get_prices(self, service: str) -> list[dict[str, Any]]:
         text = await self._request({"action": "getPrices", "service": service})
         data = json.loads(text) if text.strip().startswith("{") else {}
+        names = await self._country_names()
         rows = []
         for cid, svc in data.items():
             info = svc.get(service) if isinstance(svc, dict) else None
             if info and "cost" in info:
-                rows.append({"country": str(cid), "cost": float(info["cost"]), "count": int(info.get("count", 0))})
+                rows.append({
+                    "country": str(cid),
+                    "country_name": names.get(str(cid), ""),
+                    "cost": float(info["cost"]),
+                    "count": int(info.get("count", 0)),
+                })
         rows.sort(key=lambda r: r["cost"])
         return rows
+
+    async def _country_names(self) -> dict[str, str]:
+        """SMS-Activate getCountries → {国家ID: 中文名}；失败降级返回空(前端回退显示 ID)。"""
+        try:
+            text = await self._request({"action": "getCountries"})
+            data = json.loads(text) if text.strip().startswith("{") else {}
+            out: dict[str, str] = {}
+            for cid, info in data.items():
+                if isinstance(info, dict):
+                    out[str(cid)] = info.get("chn") or info.get("eng") or str(cid)
+            return out
+        except Exception:
+            return {}

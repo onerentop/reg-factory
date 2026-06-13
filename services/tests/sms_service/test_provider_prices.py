@@ -34,6 +34,25 @@ async def test_get_prices_empty_response(monkeypatch):
     assert rows == []
 
 
+async def test_sms_activate_get_prices_includes_country_name(monkeypatch):
+    # getPrices 只返回国家 ID；getCountries 提供中文名，get_prices 应合并出 country_name
+    def handler(req):
+        action = dict(req.url.params).get("action")
+        if action == "getCountries":
+            return httpx.Response(200, json={
+                "52": {"id": 52, "chn": "泰国", "eng": "Thailand"},
+                "4": {"id": 4, "chn": "菲律宾", "eng": "Philippines"},
+            })
+        return httpx.Response(200, json={
+            "52": {"go": {"cost": 0.1, "count": 2487}},
+            "4": {"go": {"cost": 0.025, "count": 500}},
+        })
+    patch_http(monkeypatch, handler)
+    rows = await _P({"api_key": "K"}).get_prices("go")
+    assert rows[0]["country"] == "4" and rows[0]["country_name"] == "菲律宾"
+    assert rows[1]["country"] == "52" and rows[1]["country_name"] == "泰国"
+
+
 async def test_sms_cloud_get_prices(monkeypatch):
     patch_http(monkeypatch, lambda req: httpx.Response(200, json={"code": 0, "data": [
         {"country": 187, "countryName": "美国", "count": 287628, "retailPrice": 12.0},
