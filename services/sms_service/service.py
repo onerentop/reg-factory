@@ -48,6 +48,10 @@ class SmsService:
         provider = await self._get_provider(provider_name)
         return await provider.get_prices(service)
 
+    async def get_offers(self, provider_name: str, service: str, country: str) -> dict:
+        provider = await self._get_provider(provider_name)
+        return await provider.get_offers(service, country)
+
     async def acquire_number(
         self, service: str, country: str, provider_name: str | None = None,
         max_price: str = "0", fixed_price: bool = False,

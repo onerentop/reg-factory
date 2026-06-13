@@ -66,6 +66,12 @@ class SMSProvider(ABC):
         """返回该 service 各国价格/库存：[{country, country_name?, cost, count}]，按 cost 升序。"""
         return []
 
+    async def get_offers(self, service: str, country: str) -> dict[str, Any]:
+        """返回某国某服务的价位阶梯 + 价格/库存：
+        {prices:{default,retail,min}, counts:{total,physical,defaultPrice}, tiers:[{price,count}]}。
+        默认空（仅支持该能力的平台覆盖，如 hero_sms 的 v1 /activations/offers）。"""
+        return {"prices": {}, "counts": {}, "tiers": []}
+
 
 class ProviderRegistry:
     """适配器注册表。工厂模式——按名称创建 Provider 实例。"""

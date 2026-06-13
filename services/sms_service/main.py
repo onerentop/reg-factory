@@ -85,6 +85,15 @@ async def get_prices(name: str, service: str = "go", svc: SmsService = Depends(g
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@app.get("/sms/providers/{name}/offers", response_model=ApiResponse)
+async def get_offers(name: str, service: str = "go", country: str = "", svc: SmsService = Depends(get_service)):
+    from fastapi import HTTPException
+    try:
+        return ApiResponse(data=await svc.get_offers(name, service, country))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @app.post("/sms/number/acquire", response_model=ApiResponse)
 async def acquire_number(body: AcquireRequest, service: SmsService = Depends(get_service)):
     from fastapi import HTTPException

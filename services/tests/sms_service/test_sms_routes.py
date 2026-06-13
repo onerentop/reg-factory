@@ -161,3 +161,16 @@ def test_get_prices_bad_provider_400(client):
     r = client.get("/sms/providers/x/prices?service=go")
     app.dependency_overrides.pop(get_service, None)
     assert r.status_code == 400
+
+
+def test_get_offers_route(client):
+    from sms_service.main import app, get_service
+    class _Svc:
+        async def get_offers(self, name, service, country):
+            return {"prices": {"min": 0.1}, "counts": {"total": 100}, "tiers": [{"price": 0.1, "count": 50}]}
+    app.dependency_overrides[get_service] = lambda: _Svc()
+    r = client.get("/sms/providers/hero_sms/offers?service=go&country=52")
+    app.dependency_overrides.pop(get_service, None)
+    assert r.status_code == 200
+    assert r.json()["data"]["tiers"][0]["price"] == 0.1
+    assert r.json()["data"]["counts"]["total"] == 100
