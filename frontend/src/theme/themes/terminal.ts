@@ -1,16 +1,20 @@
-import type { ThemeTokens } from '../tokens'
+import type { Palette } from '../palette'
 
-export const terminalTheme: ThemeTokens = {
-  '--bg-primary': '#052e16',
-  '--bg-card': '#14532d',
-  '--bg-sidebar': '#14532d',
-  '--bg-sidebar-icon': '#166534',
-  '--text-primary': '#dcfce7',
-  '--text-secondary': '#86efac',
-  '--border': '#166534',
-  '--accent': '#22c55e',
-  '--success': '#22c55e',
-  '--error': '#ef4444',
-  '--warning': '#f97316',
-  '--radius': '6px',
+export const terminalTheme: Palette = {
+  name: 'terminal',
+  label: '终端绿',
+  icon: '🌿',
+  mode: 'dark',
+  bg: '#052e16',
+  card: '#14532d',
+  sidebar: '#14532d',
+  sidebarIcon: '#166534',
+  text: '#dcfce7',
+  textSecondary: '#86efac',
+  border: '#166534',
+  accent: '#22c55e',
+  success: '#22c55e',
+  error: '#ef4444',
+  warning: '#f97316',
+  radius: '6px',
 }

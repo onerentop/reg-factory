@@ -1,30 +1,33 @@
 import React, { createContext, useContext, useState, useEffect } from 'react'
-import type { ThemeTokens } from './tokens'
-import { lightTheme } from './themes/light'
-import { darkTheme } from './themes/dark'
-import { cyberpunkTheme } from './themes/cyberpunk'
-import { terminalTheme } from './themes/terminal'
-
-type ThemeName = 'light' | 'dark' | 'cyberpunk' | 'terminal'
+import { ConfigProvider } from 'antd'
+import zhCN from 'antd/locale/zh_CN'
+import type { Palette, ThemeName } from './palette'
+import { themeRegistry, themeList, DEFAULT_THEME } from './registry'
+import { buildCssVars } from './buildTokens'
+import { toAntdConfig } from './antdAdapter'
 
 interface ThemeContextValue {
   theme: ThemeName
   setTheme: (name: ThemeName) => void
-  tokens: ThemeTokens
+  palette: Palette
+  themes: Palette[]
 }
 
-const themes: Record<ThemeName, ThemeTokens> = { light: lightTheme, dark: darkTheme, cyberpunk: cyberpunkTheme, terminal: terminalTheme }
-
 const ThemeContext = createContext<ThemeContextValue>({
-  theme: 'light',
+  theme: DEFAULT_THEME,
   setTheme: () => {},
-  tokens: lightTheme,
+  palette: themeRegistry[DEFAULT_THEME],
+  themes: themeList,
 })
 
+function getInitialTheme(): ThemeName {
+  const saved = localStorage.getItem('theme') as ThemeName | null
+  return saved && saved in themeRegistry ? saved : DEFAULT_THEME
+}
+
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
-  const [theme, setThemeState] = useState<ThemeName>(
-    () => (localStorage.getItem('theme') as ThemeName) || 'light'
-  )
+  const [theme, setThemeState] = useState<ThemeName>(getInitialTheme)
+  const palette = themeRegistry[theme]
 
   const setTheme = (name: ThemeName) => {
     setThemeState(name)
@@ -32,16 +35,17 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   }
 
   useEffect(() => {
-    const tokens = themes[theme]
     const root = document.documentElement
-    Object.entries(tokens).forEach(([key, value]) => {
+    Object.entries(buildCssVars(palette)).forEach(([key, value]) => {
       root.style.setProperty(key, value)
     })
-  }, [theme])
+  }, [palette])
 
   return (
-    <ThemeContext.Provider value={{ theme, setTheme, tokens: themes[theme] }}>
-      {children}
+    <ThemeContext.Provider value={{ theme, setTheme, palette, themes: themeList }}>
+      <ConfigProvider locale={zhCN} theme={toAntdConfig(palette)}>
+        {children}
+      </ConfigProvider>
     </ThemeContext.Provider>
   )
 }

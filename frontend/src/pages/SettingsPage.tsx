@@ -82,32 +82,25 @@ function ConcurrencyTab() {
 }
 
 function ThemeTab() {
-  const { theme, setTheme } = useTheme()
-
-  const themes = [
-    { key: 'light', label: '☀️ 亮色', color: '#f8fafc' },
-    { key: 'dark', label: '🌙 暗色', color: '#0f172a' },
-    { key: 'cyberpunk', label: '💜 赛博紫', color: '#0f0a2a' },
-    { key: 'terminal', label: '🌿 终端绿', color: '#052e16' },
-  ]
+  const { theme, setTheme, themes } = useTheme()
 
   return (
     <Card title="主题设置" size="small">
-      <div style={{ display: 'flex', gap: 16 }}>
+      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
         {themes.map(t => (
           <div
-            key={t.key}
-            onClick={() => setTheme(t.key as 'light' | 'dark' | 'cyberpunk' | 'terminal')}
+            key={t.name}
+            onClick={() => setTheme(t.name)}
             style={{
               width: 80, height: 80, borderRadius: 12,
-              background: t.color, border: theme === t.key ? '3px solid var(--accent)' : '2px solid var(--border)',
+              background: t.bg, border: theme === t.name ? '3px solid var(--accent)' : '2px solid var(--border)',
               cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center',
               flexDirection: 'column', gap: 4,
             }}
           >
-            <span style={{ fontSize: 20 }}>{t.label.split(' ')[0]}</span>
-            <span style={{ fontSize: 10, color: theme === t.key ? 'var(--accent)' : 'var(--text-secondary)' }}>
-              {t.label.split(' ')[1]}
+            <span style={{ fontSize: 20 }}>{t.icon}</span>
+            <span style={{ fontSize: 10, color: theme === t.name ? 'var(--accent)' : 'var(--text-secondary)' }}>
+              {t.label}
             </span>
           </div>
         ))}

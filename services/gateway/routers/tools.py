@@ -75,6 +75,14 @@ async def extract_graph_token_api(body: dict):
             except Exception:
                 pass
             if proxy_for_token:
+                # socks5→socks5h(1024proxy 要远端 DNS，否则 SSL EOF) + 轮换 sid(DB 里
+                # 固定 sid 可能已失效，换新会话拿可用出口 IP)
+                proxy_for_token = proxy_for_token.replace("socks5://", "socks5h://")
+                try:
+                    from worker.tasks._helpers import rotate_proxy_sid
+                    proxy_for_token = rotate_proxy_sid(proxy_for_token)
+                except Exception:
+                    pass
                 os.environ["HTTPS_PROXY"] = proxy_for_token
                 os.environ["HTTP_PROXY"] = proxy_for_token
             else:

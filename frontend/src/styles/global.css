@@ -1,37 +1,39 @@
 @import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
 
+/* 主题相关变量（默认 = 海洋微光 Ocean）由 ThemeProvider 在挂载时按当前主题覆盖；
+   此处为 JS 执行前的首屏兜底值。字体/阴影/--radius-lg 主题无关，固定在此。 */
 :root {
-  --bg-primary: #faf9f7;
+  --bg-primary: #f0f9ff;
   --bg-card: #ffffff;
-  --bg-card-hover: #fefefe;
+  --bg-card-hover: #fafdff;
   --bg-sidebar: #ffffff;
-  --bg-sidebar-icon: #f5f3f0;
-  --bg-input: #faf9f7;
-  --bg-elevated: #f5f3f0;
-  --bg-accent-soft: #f0ebff;
-  --bg-success-soft: #ecfdf5;
-  --bg-error-soft: #fef2f2;
-  --bg-warning-soft: #fffbeb;
+  --bg-sidebar-icon: #e0f2fe;
+  --bg-input: #f0f9ff;
+  --bg-elevated: #e6eef4;
+  --bg-accent-soft: rgba(8, 145, 178, 0.10);
+  --bg-success-soft: rgba(22, 163, 74, 0.10);
+  --bg-error-soft: rgba(220, 38, 38, 0.10);
+  --bg-warning-soft: rgba(234, 88, 12, 0.10);
 
-  --text-primary: #1a1523;
-  --text-secondary: #6e6a7c;
-  --text-muted: #9f9bab;
-  --text-bright: #0d0b12;
+  --text-primary: #0f172a;
+  --text-secondary: #64748b;
+  --text-muted: #94a3b8;
+  --text-bright: #0b1120;
 
-  --border: #eae8e4;
-  --border-bright: #d8d5cf;
+  --border: #e2e8f0;
+  --border-bright: #cbd5e1;
 
-  --accent: #7c5cfc;
-  --accent-light: #9b82fc;
-  --accent-dim: rgba(124, 92, 252, 0.08);
-  --accent-soft: rgba(124, 92, 252, 0.12);
+  --accent: #0891b2;
+  --accent-light: #0ea5c4;
+  --accent-dim: rgba(8, 145, 178, 0.08);
+  --accent-soft: rgba(8, 145, 178, 0.12);
 
   --success: #16a34a;
   --success-dim: rgba(22, 163, 74, 0.08);
   --error: #dc2626;
   --error-dim: rgba(220, 38, 38, 0.08);
-  --warning: #d97706;
-  --warning-dim: rgba(217, 119, 6, 0.08);
+  --warning: #ea580c;
+  --warning-dim: rgba(234, 88, 12, 0.08);
 
   --font-sans: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
   --font-mono: 'IBM Plex Mono', 'Consolas', monospace;
