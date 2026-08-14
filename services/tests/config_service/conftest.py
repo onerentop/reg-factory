@@ -3,6 +3,8 @@
 TestClient(app) 不加 with → 不触发 lifespan(无 create_all/DB 网络)；
 路由依赖经 app.dependency_overrides 换 fake，故不碰真 DB/服务。
 """
+import uuid
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -18,6 +20,7 @@ def _make_config(**kwargs) -> ConfigRead:
 
 def _make_version(**kwargs) -> ConfigVersionRead:
     defaults = dict(
+        id=uuid.uuid4(),
         config_key="app.name",
         old_value="Old",
         new_value="RegFactory",
@@ -28,6 +31,9 @@ def _make_version(**kwargs) -> ConfigVersionRead:
 
 
 class FakeConfigService:
+    def __init__(self):
+        self.history = [_make_version(), _make_version(old_value="Older", new_value="Old")]
+
     async def get_all(self):
         return [_make_config()]
 
@@ -46,7 +52,7 @@ class FakeConfigService:
         return key == "app.name"
 
     async def get_history(self, key):
-        return [_make_version(config_key=key), _make_version(config_key=key, old_value="Older", new_value="Old")]
+        return self.history
 
 
 @pytest.fixture

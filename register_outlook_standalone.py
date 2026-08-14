@@ -461,7 +461,7 @@ async def extract_graph_token(page, context, email, password, idx=0):
             if not logged_in and await _safe_count(email_input) > 0 and await _safe_visible(email_input):
                 try:
                     await email_input.fill(email, timeout=3000)
-                    await page.locator('#idSIButton9, button[type="submit"]').first.click(timeout=3000)
+                    await page.locator('#idSIButton9, button[type="submit"]').first.click(timeout=8000)
                     print(f"  {tag} [graph] entered email")
                     await asyncio.sleep(4)
                     continue
@@ -476,7 +476,7 @@ async def extract_graph_token(page, context, email, password, idx=0):
                 try:
                     lnk = page.locator(pw_sel).last
                     if await lnk.count() > 0 and await lnk.is_visible():
-                        await lnk.click(timeout=3000)
+                        await lnk.click(timeout=8000)
                         print(f"  {tag} [graph] switched to password mode")
                         await asyncio.sleep(4)
                         break
@@ -489,7 +489,7 @@ async def extract_graph_token(page, context, email, password, idx=0):
             if not logged_in and await _safe_count(pwd_input) > 0 and await _safe_visible(pwd_input):
                 try:
                     await pwd_input.fill(password, timeout=3000)
-                    await page.locator('#idSIButton9, button[type="submit"]').first.click(timeout=3000)
+                    await page.locator('#idSIButton9, button[type="submit"]').first.click(timeout=8000)
                     print(f"  {tag} [graph] entered password")
                     logged_in = True
                     await asyncio.sleep(4)
@@ -504,7 +504,7 @@ async def extract_graph_token(page, context, email, password, idx=0):
                 try:
                     btn = page.locator(sel).first
                     if await btn.count() > 0 and await btn.is_visible():
-                        await btn.click(timeout=3000)
+                        await btn.click(timeout=8000)
                         print(f"  {tag} [graph] skip: {sel}")
                         await asyncio.sleep(3)
                         break
@@ -517,7 +517,7 @@ async def extract_graph_token(page, context, email, password, idx=0):
                 try:
                     btn = page.locator(sel).first
                     if await btn.count() > 0 and await btn.is_visible():
-                        await btn.click(timeout=3000)
+                        await btn.click(timeout=8000)
                         print(f"  {tag} [graph] clicked: {sel}")
                         await asyncio.sleep(3)
                         break
@@ -532,7 +532,7 @@ async def extract_graph_token(page, context, email, password, idx=0):
                 try:
                     btn = page.locator(sel).first
                     if await btn.count() > 0 and await btn.is_visible():
-                        await btn.click(timeout=3000)
+                        await btn.click(timeout=8000)
                         print(f"  {tag} [graph] consent: {sel}")
                         await asyncio.sleep(3)
                         break
@@ -603,7 +603,12 @@ async def _warm_session(page, idx, tag):
         return
     try:
         print(f"  {tag} warming session (outlook.com)...")
-        await page.goto("https://outlook.com/", timeout=45000, wait_until="domcontentloaded")
+        # asyncio.wait_for 硬超时：Playwright 的 goto timeout 在代理连接挂起时
+        # 可能不触发（TCP 半开），导致预热卡死整个注册。强制 40s 中断。
+        await asyncio.wait_for(
+            page.goto("https://outlook.com/", timeout=30000, wait_until="domcontentloaded"),
+            timeout=40,
+        )
         # 人类化活动：随机鼠标移动 + 偶尔滚动 + 自然停顿
         for _ in range(random.randint(4, 7)):
             await page.mouse.move(random.uniform(120, 1100), random.uniform(120, 650),
@@ -652,9 +657,27 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False, prox
     try:
         await _warm_session(page, idx, tag)   # 会话预热(+10-15%)，再去 signup 带上自然来路
         print(f"  {tag} navigating to signup page...")
-        await page.goto("https://signup.live.com/signup?lic=1", timeout=60000,
-                        wait_until="domcontentloaded", referer="https://outlook.com/")
-        await asyncio.sleep(random.uniform(2.5, 4.5))
+        await asyncio.wait_for(
+            page.goto("https://signup.live.com/signup?lic=1", timeout=50000,
+                      wait_until="domcontentloaded", referer="https://outlook.com/"),
+            timeout=55,
+        )
+        # 等页面真正渲染完成（慢代理/住宅 IP 下 CSS+JS 可能 10-20s 才出内容，
+        # 只等 domcontentloaded 会拿到空白 body，后续填表/验证码全部错位）。
+        # 轮询 body 出现可识别的注册表单文本（多语言），最多等 30s。
+        for _render_wait in range(15):
+            await asyncio.sleep(2)
+            try:
+                _rt = (await page.evaluate("() => document.body.innerText")).lower()
+            except Exception:
+                _rt = ""
+            if any(kw in _rt for kw in [
+                "create your microsoft", "crear tu cuenta", "créez votre compte",
+                "erstellen sie ihr", "crea il tuo account", "crie sua conta",
+                "tạo tài khoản", "创建你的", "创建帐户", "建立您的",
+            ]):
+                break
+        await asyncio.sleep(random.uniform(1.0, 2.0))
         await page.screenshot(path=f"{SCREENSHOT_DIR}/outlook_{idx}_start.png")
 
         # Handle privacy/consent pages (Chinese "个人数据导出许可", "同意并继续", etc.)
@@ -758,11 +781,25 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False, prox
                 print(f"  {tag} filled email: {email}")
 
             await asyncio.sleep(0.5)
+            # 邮箱 Next：按钮可能有入场动画（Fluent UI 位移），直接点会因
+            # "element not stable" 超时。先等元素静止，再点击；失败重试几次。
+            clicked_next = False
             for sel in ['input[type="submit"]', 'button[type="submit"]', '#iSignupAction', 'button[id="iSignupAction"]']:
                 btn = page.locator(sel).first
                 if await _safe_count(btn) > 0:
-                    await btn.click(timeout=3000)
+                    for attempt in range(3):
+                        try:
+                            await btn.wait_for(state="visible", timeout=3000)
+                            await page.wait_for_timeout(300)  # 等入场动画结束
+                            await btn.click(timeout=5000)
+                            clicked_next = True
+                            print(f"  {tag} clicked next (email): {sel} (attempt {attempt+1})")
+                            break
+                        except Exception:
+                            await page.wait_for_timeout(500)
                     break
+            if not clicked_next:
+                await page.keyboard.press("Enter")
             await asyncio.sleep(3)
 
             page_text = await page.evaluate("() => document.body.innerText")
@@ -818,7 +855,7 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False, prox
                 btn = page.locator(sel).first
                 if await _safe_count(btn) > 0:
                     try:
-                        await btn.click(timeout=3000)
+                        await btn.click(timeout=8000)
                         clicked_next = True
                         break
                     except Exception:
@@ -951,12 +988,17 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False, prox
 
                     if is_month and not month_filled:
                         await combo.click(force=True)
-                        await asyncio.sleep(1)
+                        # 等待下拉选项渲染（慢代理下 1s 不够）
+                        opts = None
+                        for _wait in range(10):
+                            await asyncio.sleep(0.5)
+                            opts = page.locator('[role="option"]')
+                            if await _safe_count(opts) > 0:
+                                break
                         # 按位置选第 month 个月选项(语言无关)：Outlook 界面随出口 IP
                         # 国家本地化(葡/德/法/西…)，硬编码月名列表不可持续。过滤掉占位项
                         # 后，剩下的选项即 1..12 月，顺序固定，选第 month 个。
-                        opts = page.locator('[role="option"]')
-                        n_opt = await _safe_count(opts)
+                        n_opt = await _safe_count(opts) if opts else 0
                         ph_words = ["month", "月", "mois", "mês", "mes", "monat"]
                         real = []
                         for oi in range(n_opt):
@@ -974,17 +1016,22 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False, prox
                             await asyncio.sleep(0.3)
                             await page.keyboard.press("Enter")
                             month_filled = True
+                            print(f"  {tag} month: {month} (keyboard fallback)")
                         await asyncio.sleep(1)
 
                     elif is_day and not day_filled:
                         await combo.click(force=True)
-                        await asyncio.sleep(1)
+                        # 等待下拉选项渲染（慢代理下 1s 不够）
+                        all_opts = page.locator('[role="option"]')
+                        for _wait in range(10):
+                            if await _safe_count(all_opts) > 0:
+                                break
+                            await asyncio.sleep(0.5)
                         # Try day option: exact match first to avoid "1" matching "10","11"...
                         day_str = str(day)
                         # Try exact match via all options
                         day_opt = None
                         try:
-                            all_opts = page.locator('[role="option"]')
                             opt_count = await _safe_count(all_opts)
                             for oi in range(opt_count):
                                 opt_text = (await all_opts.nth(oi).text_content() or "").strip()
@@ -1039,7 +1086,7 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False, prox
                     'button:has-text("Suivant")']:
             btn = page.locator(sel).first
             if await _safe_count(btn) > 0:
-                await btn.click(timeout=3000)
+                await btn.click(timeout=8000)
                 print(f"  {tag} clicked next (bday): {sel}")
                 break
         await asyncio.sleep(3)
@@ -1064,7 +1111,7 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False, prox
                             'button:has-text("Suivant")']:
                     btn = page.locator(sel).first
                     if await _safe_count(btn) > 0:
-                        await btn.click(timeout=3000)
+                        await btn.click(timeout=8000)
                         break
                 await asyncio.sleep(3)
 
@@ -1121,7 +1168,7 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False, prox
                     'button:has-text("下一步")', 'button:has-text("Suivant")']:
             btn = page.locator(sel).first
             if await _safe_count(btn) > 0:
-                await btn.click(timeout=3000)
+                await btn.click(timeout=8000)
                 print(f"  {tag} clicked next (name): {sel}")
                 break
         await asyncio.sleep(3)
@@ -1233,7 +1280,7 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False, prox
                     btn = page.locator(sel).first
                     if await _safe_count(btn) > 0:
                         try:
-                            await btn.click(timeout=3000)
+                            await btn.click(timeout=8000)
                             break
                         except Exception:
                             pass
@@ -1257,7 +1304,7 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False, prox
                     btn = page.locator(f'button:has-text("{label}"), input[value="{label}"], a:has-text("{label}")').first
                     if await _safe_count(btn) > 0:
                         try:
-                            await btn.click(timeout=3000)
+                            await btn.click(timeout=8000)
                             break
                         except Exception:
                             pass
@@ -1304,7 +1351,24 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False, prox
                         for hi in range(await _safe_count(hs_iframes)):
                             box = await hs_iframes.nth(hi).bounding_box()
                             if box and box['width'] > 50 and box['height'] > 30:
-                                target_box = box
+                                # 优先进入 iframe 精确定位 #px-captcha 按钮中心，
+                                # 而不是把整个 iframe 框当按压点（会偏到左上）。
+                                target_box = None
+                                for f in page.frames:
+                                    furl = (f.url or '').lower()
+                                    if 'hsprotect.net' in furl:
+                                        try:
+                                            px = f.locator('#px-captcha')
+                                            if await _safe_count(px) > 0:
+                                                b = await px.bounding_box()
+                                                if b and b['width'] > 30 and b['height'] > 10:
+                                                    target_box = b
+                                                    print(f"  {tag} found px-captcha in iframe frame")
+                                                    break
+                                        except Exception:
+                                            pass
+                                if target_box is None:
+                                    target_box = box  # 兜底：iframe 框中心
                                 break
                     except Exception:
                         pass
@@ -1358,7 +1422,7 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False, prox
                     await asyncio.sleep(random.uniform(3, 6))
 
                     try:
-                        await page.screenshot(path=f"{SCREENSHOT_DIR}/outlook_{idx}_hold_{press_count}.png")
+                        await page.screenshot(path=f"{SCREENSHOT_DIR}/outlook_{idx}_hold_{press_count}.png", timeout=5000)
                     except Exception:
                         pass
                 else:
@@ -1405,7 +1469,7 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False, prox
                         box = await main_btns.nth(bi).bounding_box()
                         if box and box['width'] > 20:
                             press_count += 1
-                            await main_btns.nth(bi).click(timeout=3000)
+                            await main_btns.nth(bi).click(timeout=8000)
                             await asyncio.sleep(5)
                             no_btn_rounds = 0
                             break
@@ -1418,7 +1482,7 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False, prox
                     for sel in ['#iSignupAction', 'input[type="submit"]', 'button[type="submit"]']:
                         submit = page.locator(sel).first
                         if await _safe_count(submit) > 0 and await submit.is_visible():
-                            await submit.click(timeout=3000)
+                            await submit.click(timeout=8000)
                             await asyncio.sleep(5)
                             break
                 except Exception:
@@ -1517,7 +1581,7 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False, prox
                 btn = page.locator(f'button:has-text("{label}"), input[value="{label}"], a:has-text("{label}")').first
                 if await _safe_count(btn) > 0:
                     try:
-                        await btn.click(timeout=3000)
+                        await btn.click(timeout=8000)
                         break
                     except Exception:
                         pass
@@ -2053,6 +2117,11 @@ async def _open_ixbrowser_page(bb, idx, proxy_str):
             browser = await p.chromium.connect_over_cdp(ws)
             context = browser.contexts[0] if browser.contexts else await browser.new_context()
             page = await context.new_page()
+
+            # 渲染视口对齐由 donut 内核侧修复(wayfern_manager 加
+            # --force-device-scale-factor=1 + 窗口夹紧到物理可用区)，此处不再 override，
+            # 保持内核原生状态，避免 CDP override 与指纹 screen 冲突造成坐标错位。
+
             # 禁用 passkey 弹窗：覆盖 navigator.credentials，网站 fallback 到密码登录
             await context.add_init_script("""
                 Object.defineProperty(navigator, 'credentials', {

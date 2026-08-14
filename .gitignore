@@ -91,3 +91,7 @@ frontend/coverage/
 frontend/test-results/
 frontend/playwright-report/
 framework/.playwright/
+
+# 代理文件（含凭据，绝不提交）
+proxies_*.txt
+services/data/

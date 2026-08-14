@@ -1,250 +1,175 @@
-"""registration 路由行为测试。
-
-routes:
-  POST /register/outlook  → gateway.routers.registration._pick_active_proxy(session)
-                            (直接查 gateway.db，不 HTTP 自调用)
-                            + worker.process_manager.task_manager.submit(idx, proxy, config)
-                            + worker.tasks._helpers.rotate_proxy_sid(每窗口轮换 sid)
-                            + gateway.registration_helpers.resolve_registration_mode()
-  GET  /tasks/{task_id}  → worker.process_manager.task_manager.get_status(task_id)
-
-端点新增 session 依赖(get_session)；测试 override 为 None(取 proxy 经 mock 的
-_pick_active_proxy，不碰真 DB)。task_manager 是模块级单例，懒导入，patch
-worker.process_manager.task_manager。
-"""
-
-from unittest.mock import AsyncMock, patch
+"""单体注册 API：只验证本机任务投递与 SQLite 状态查询，不执行浏览器流程。"""
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
+import uuid
 
 import pytest
 
-from gateway.main import app
 from gateway.deps import get_session
+from gateway.main import app
 
 
 @pytest.fixture(autouse=True)
-def _no_session():
-    # 端点签名有 session=Depends(get_session)；测试不碰真 DB(proxy 经 mock 取)
+def no_database_session():
     app.dependency_overrides[get_session] = lambda: None
-    yield
+    with patch("gateway.registration_jobs.RegistrationJobService.enqueue", new=AsyncMock()), patch(
+        "gateway.registration_jobs.RegistrationJobService.get_by_task_id",
+        new=AsyncMock(return_value=None),
+    ):
+        yield
     app.dependency_overrides.pop(get_session, None)
 
 
-# ──────────────────────────────────────────────
-# POST /register/outlook
-# ──────────────────────────────────────────────
+class FakeRuntime:
+    def __init__(self):
+        self.submissions = []
 
-def test_register_outlook_happy_single(client):
-    """count=1，无 proxy → _pick_active_proxy → submit → task_ids 长度 1。"""
-    with patch("gateway.routers.registration._pick_active_proxy", new_callable=AsyncMock, return_value="socks5://1.2.3.4:1080"), \
-         patch("worker.process_manager.task_manager") as mock_tm:
-        mock_tm.submit.return_value = "tid-001"
+    async def submit_registration(self, task_id, **kwargs):
+        self.submissions.append((task_id, kwargs))
 
-        r = client.post("/register/outlook", json={"count": 1, "config": {"headless": True}})
 
-    assert r.status_code == 200
-    data = r.json()["data"]
+def test_register_outlook_queues_local_task(client):
+    runtime = FakeRuntime()
+    app.state.task_manager = runtime
+    with patch(
+        "gateway.routers.registration._pick_active_proxy",
+        new_callable=AsyncMock,
+        return_value="socks5://1.2.3.4:1080",
+    ):
+        response = client.post("/register/outlook", json={"config": {"headless": True}})
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["status"] == "queued"
     assert data["count"] == 1
-    assert data["status"] == "running"
-    assert data["task_ids"] == ["tid-001"]
-    mock_tm.submit.assert_called_once()
+    assert len(data["task_ids"]) == 1
+    task_id, call = runtime.submissions[0]
+    assert task_id == data["task_ids"][0]
+    assert call["platform"] == "outlook"
+    assert call["config"]["mode"] == "browser"
 
 
-def test_register_outlook_happy_multi(client):
-    """count=3 → 调用 submit 三次 → 返回 3 个 task_id。"""
-    task_ids = ["tid-a", "tid-b", "tid-c"]
-    call_count = 0
+def test_register_multiple_tasks_use_same_proxy(client):
+    runtime = FakeRuntime()
+    app.state.task_manager = runtime
+    with patch(
+        "gateway.routers.registration._pick_active_proxy",
+        new_callable=AsyncMock,
+        return_value="socks5://source:1080",
+    ):
+        response = client.post("/register/outlook", json={"count": 2})
 
-    def fake_submit(**kwargs):
-        nonlocal call_count
-        tid = task_ids[call_count]
-        call_count += 1
-        return tid
-
-    with patch("gateway.routers.registration._pick_active_proxy", new_callable=AsyncMock, return_value=""), \
-         patch("worker.process_manager.task_manager") as mock_tm:
-        mock_tm.submit.side_effect = fake_submit
-
-        r = client.post("/register/outlook", json={"count": 3})
-
-    assert r.status_code == 200
-    data = r.json()["data"]
-    assert data["count"] == 3
-    assert len(data["task_ids"]) == 3
+    assert response.status_code == 200
+    assert len(runtime.submissions) == 2
+    assert [call[1]["proxy"] for call in runtime.submissions] == [
+        "socks5://source:1080",
+        "socks5://source:1080",
+    ]
 
 
-def test_register_outlook_uses_provided_proxy(client):
-    """body 中已提供 proxy → 不调用 _pick_active_proxy。"""
-    with patch("gateway.routers.registration._pick_active_proxy", new_callable=AsyncMock) as mock_pick, \
-         patch("worker.process_manager.task_manager") as mock_tm:
-        mock_tm.submit.return_value = "tid-proxy"
+def test_register_uses_proxy_id_without_exposing_password(client):
+    runtime = FakeRuntime()
+    app.state.task_manager = runtime
+    proxy_id = str(uuid.uuid4())
+    with patch(
+        "gateway.routers.registration._resolve_proxy",
+        new_callable=AsyncMock,
+        return_value="socks5://user:secret@9.9.9.9:1080",
+    ) as resolve_proxy:
+        response = client.post("/register/outlook", json={"proxy_id": proxy_id})
 
-        r = client.post(
+    assert response.status_code == 200
+    resolve_proxy.assert_awaited_once_with(None, proxy_id, "")
+    assert runtime.submissions[0][1]["proxy"] == "socks5://user:secret@9.9.9.9:1080"
+
+
+def test_register_uses_provided_proxy_and_mode(client):
+    runtime = FakeRuntime()
+    app.state.task_manager = runtime
+    with patch(
+        "gateway.routers.registration._pick_active_proxy", new_callable=AsyncMock
+    ) as pick_proxy:
+        response = client.post(
             "/register/outlook",
-            json={"count": 1, "proxy": "socks5://user:pw@9.9.9.9:1080"},
+            json={
+                "proxy": "socks5://user:pw@9.9.9.9:1080",
+                "mode": "hybrid",
+                "config": {"mode": "browser"},
+            },
         )
 
-    assert r.status_code == 200
-    mock_pick.assert_not_called()
-    # submit 被调用时 proxy 应是传入的那个(不含 -sid- → rotate 原样返回)
-    call_kwargs = mock_tm.submit.call_args[1]
-    assert call_kwargs.get("proxy") == "socks5://user:pw@9.9.9.9:1080"
+    assert response.status_code == 200
+    pick_proxy.assert_not_called()
+    call = runtime.submissions[0][1]
+    assert call["proxy"] == "socks5://user:pw@9.9.9.9:1080"
+    assert call["config"]["mode"] == "hybrid"
 
 
-def test_register_outlook_rotates_sid_per_window(client):
-    """count=2 并发：每个 submit 的 proxy 轮换不同 sid → 不同出口 IP
-    (避免 PerimeterX 因同 IP 关联多个账号)。"""
-    import re
+def test_register_google_injects_local_sms_config(client):
+    runtime = FakeRuntime()
+    app.state.task_manager = runtime
+    config_entry = SimpleNamespace(value={"provider": "hero_sms", "country": "52"})
+    with patch(
+        "gateway.routers.registration._pick_active_proxy", new_callable=AsyncMock, return_value=""
+    ), patch("config_service.service.ConfigService.get", new=AsyncMock(return_value=config_entry)):
+        response = client.post("/register/google", json={})
 
-    proxies_used = []
-
-    def fake_submit(**kwargs):
-        proxies_used.append(kwargs.get("proxy"))
-        return f"tid-{len(proxies_used)}"
-
-    base = "socks5://sb7f3017-region-Rand-sid-ORIG1234-t-5:pw@us.1024proxy.io:3000"
-    with patch("gateway.routers.registration._pick_active_proxy", new_callable=AsyncMock, return_value=base), \
-         patch("worker.process_manager.task_manager") as mock_tm:
-        mock_tm.submit.side_effect = fake_submit
-        r = client.post("/register/outlook", json={"count": 2})
-
-    assert r.status_code == 200
-    assert len(proxies_used) == 2
-    sids = [re.search(r"-sid-([A-Za-z0-9]+)-t-", p).group(1) for p in proxies_used]
-    assert sids[0] != sids[1]  # 两窗口 sid 不同
-    assert all("us.1024proxy.io:3000" in p for p in proxies_used)
-    assert all(p.startswith("socks5://sb7f3017-region-Rand-sid-") for p in proxies_used)
+    assert response.status_code == 200
+    assert runtime.submissions[0][1]["config"]["sms"]["provider"] == "hero_sms"
 
 
-def test_register_outlook_mode_from_body(client):
-    """body.mode 优先级最高，config 中传入的 mode 会被覆盖。"""
-    with patch("gateway.routers.registration._pick_active_proxy", new_callable=AsyncMock, return_value=""), \
-         patch("worker.process_manager.task_manager") as mock_tm:
-        mock_tm.submit.return_value = "tid-mode"
-
-        r = client.post(
-            "/register/outlook",
-            json={"count": 1, "mode": "hybrid", "config": {"mode": "browser"}},
-        )
-
-    assert r.status_code == 200
-    call_kwargs = mock_tm.submit.call_args[1]
-    assert call_kwargs.get("config", {}).get("mode") == "hybrid"
+def test_register_rejects_invalid_count_before_queueing(client):
+    app.state.task_manager = FakeRuntime()
+    response = client.post("/register/outlook", json={"count": 0})
+    assert response.status_code == 422
+    assert not app.state.task_manager.submissions
 
 
-def test_register_outlook_default_mode_browser(client):
-    """不传 mode → 默认 'browser'。"""
-    with patch("gateway.routers.registration._pick_active_proxy", new_callable=AsyncMock, return_value=""), \
-         patch("worker.process_manager.task_manager") as mock_tm:
-        mock_tm.submit.return_value = "tid-default-mode"
-
-        r = client.post("/register/outlook", json={})
-
-    assert r.status_code == 200
-    call_kwargs = mock_tm.submit.call_args[1]
-    assert call_kwargs.get("config", {}).get("mode") == "browser"
+def test_register_rejects_unsupported_platform_before_queueing(client):
+    app.state.task_manager = FakeRuntime()
+    response = client.post("/register/claude", json={})
+    assert response.status_code == 422
+    assert not app.state.task_manager.submissions
 
 
-def test_register_outlook_empty_body(client):
-    """空 body（合法 JSON）也应成功——路由有默认值。"""
-    with patch("gateway.routers.registration._pick_active_proxy", new_callable=AsyncMock, return_value=""), \
-         patch("worker.process_manager.task_manager") as mock_tm:
-        mock_tm.submit.return_value = "tid-empty"
-        r = client.post("/register/outlook", json={})
-
-    assert r.status_code == 200
-    assert r.json()["data"]["count"] == 1  # 默认 count=1
+def test_register_rejects_google_protocol_mode_before_queueing(client):
+    app.state.task_manager = FakeRuntime()
+    response = client.post("/register/google", json={"mode": "protocol"})
+    assert response.status_code == 422
+    assert not app.state.task_manager.submissions
 
 
-def test_register_google_passes_platform(client):
-    """POST /register/google → submit 收到 platform='google'(分发到 google flow)。"""
-    captured = {}
+def test_get_task_status_reads_persisted_job_only(client):
+    persisted = SimpleNamespace(
+        task_id="task-001",
+        platform="outlook",
+        status="running",
+        result=None,
+        error_message=None,
+        created_at=None,
+        updated_at=None,
+        last_event_seq=0,
+    )
+    with patch(
+        "gateway.registration_jobs.RegistrationJobService.get_by_task_id",
+        new=AsyncMock(return_value=persisted),
+    ):
+        response = client.get("/tasks/task-001")
 
-    def fake_submit(**kwargs):
-        captured.update(kwargs)
-        return "tid-g"
-
-    with patch("gateway.routers.registration._pick_active_proxy", new_callable=AsyncMock, return_value=""), \
-         patch("worker.process_manager.task_manager") as mock_tm:
-        mock_tm.submit.side_effect = fake_submit
-        r = client.post("/register/google", json={"count": 1})
-
-    assert r.status_code == 200
-    assert captured.get("platform") == "google"
-
-
-def test_register_google_injects_sms_config(client):
-    from unittest.mock import AsyncMock, MagicMock
-    captured = {}
-    def fake_submit(**kwargs):
-        captured.update(kwargs)
-        return "tid"
-    fake_resp = MagicMock()
-    fake_resp.json.return_value = {"data": {"value": {"provider": "hero_sms", "country": "52", "max_price": "0.2", "fixed_price": False}}}
-    fake_client = AsyncMock()
-    fake_client.get = AsyncMock(return_value=fake_resp)
-    fake_ctx = MagicMock()
-    fake_ctx.__aenter__ = AsyncMock(return_value=fake_client)
-    fake_ctx.__aexit__ = AsyncMock(return_value=False)
-    with patch("gateway.routers.registration._pick_active_proxy", new_callable=AsyncMock, return_value=""), \
-         patch("gateway.routers.registration._httpx.AsyncClient", return_value=fake_ctx), \
-         patch("worker.process_manager.task_manager") as mock_tm:
-        mock_tm.submit.side_effect = fake_submit
-        r = client.post("/register/google", json={"count": 1})
-    assert r.status_code == 200
-    assert captured["config"]["sms"]["provider"] == "hero_sms"
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "task_id": "task-001",
+        "platform": "outlook",
+        "status": "running",
+        "result": None,
+        "error": None,
+        "last_event_seq": 0,
+        "created_at": None,
+        "updated_at": None,
+    }
 
 
-def test_register_google_sms_config_fetch_failure_does_not_block(client):
-    """config_service 挂掉/拉取异常时，注册仍应继续(静默兜底)。"""
-    with patch("gateway.routers.registration._httpx.AsyncClient", side_effect=Exception("conn refused")), \
-         patch("gateway.routers.registration._pick_active_proxy", new_callable=AsyncMock, return_value=""), \
-         patch("worker.process_manager.task_manager") as mock_tm:
-        mock_tm.submit.return_value = "tid"
-        r = client.post("/register/google", json={"count": 1})
-    assert r.status_code == 200
-
-
-# ──────────────────────────────────────────────
-# GET /tasks/{task_id}
-# ──────────────────────────────────────────────
-
-def test_get_task_status_running(client):
-    """task_manager.get_status 返回 running 状态。"""
-    fake_status = {"status": "running", "task_id": "tid-001", "elapsed": 10}
-
-    with patch("worker.process_manager.task_manager") as mock_tm:
-        mock_tm.get_status.return_value = fake_status
-        r = client.get("/tasks/tid-001")
-
-    assert r.status_code == 200
-    data = r.json()["data"]
-    assert data["status"] == "running"
-    assert data["task_id"] == "tid-001"
-    mock_tm.get_status.assert_called_once_with("tid-001")
-
-
-def test_get_task_status_completed(client):
-    """task_manager.get_status 返回 completed 状态。"""
-    fake_status = {"status": "completed", "task_id": "tid-002", "exitcode": 0, "elapsed": 45}
-
-    with patch("worker.process_manager.task_manager") as mock_tm:
-        mock_tm.get_status.return_value = fake_status
-        r = client.get("/tasks/tid-002")
-
-    assert r.status_code == 200
-    data = r.json()["data"]
-    assert data["status"] == "completed"
-    assert data["exitcode"] == 0
-
-
-def test_get_task_status_unknown(client):
-    """task_id 不存在 → get_status 返回 unknown。"""
-    fake_status = {"status": "unknown", "task_id": "no-such-task"}
-
-    with patch("worker.process_manager.task_manager") as mock_tm:
-        mock_tm.get_status.return_value = fake_status
-        r = client.get("/tasks/no-such-task")
-
-    assert r.status_code == 200
-    data = r.json()["data"]
-    assert data["status"] == "unknown"
+def test_get_unknown_task_does_not_query_external_backend(client):
+    response = client.get("/tasks/missing")
+    assert response.status_code == 200
+    assert response.json()["data"] == {"task_id": "missing", "status": "unknown"}

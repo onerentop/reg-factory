@@ -26,6 +26,7 @@ class FakeProxyEntry:
         self.username = kw.get("username")
         self.password = kw.get("password")
         self.status = kw.get("status", "active")
+        self.region = kw.get("region")
         self.created_at = None
 
 
@@ -103,6 +104,8 @@ def test_list_proxies_with_items(client):
     assert items[0]["host"] == entry.host
     assert items[0]["port"] == entry.port
     assert "id" in items[0]
+    assert "password" not in items[0]
+    assert items[0]["has_password"] is False
 
 
 # ──────────────────────────────────────────────
@@ -127,17 +130,14 @@ def test_add_proxy_happy(client):
 
     app.dependency_overrides[get_session] = _session_override(_Session())
 
-    with patch("shared.audit.AuditRecorder.record"):
-        r = client.post("/proxy", json={"host": "5.6.7.8", "port": 3128, "type": "http"})
+    r = client.post("/proxy", json={"host": "5.6.7.8", "port": 3128, "type": "http"})
 
     assert r.status_code == 200
     assert "id" in r.json()["data"]
 
 
-def test_add_proxy_missing_port_raises(client):
-    """port 是 body["port"]（必填），缺失会引发 KeyError。
-    路由用 `body: dict`，无 Pydantic 校验；TestClient 默认将服务器异常重新抛出。
-    用 raise_server_exceptions=False 捕获为 500 响应。"""
+def test_add_proxy_missing_port_is_rejected(client):
+    """ProxyWrite 在访问数据库前拒绝缺失的必填端口。"""
     class _Session:
         async def execute(self, stmt): return None
         def add(self, obj): obj.id = uuid.uuid4()
@@ -146,10 +146,8 @@ def test_add_proxy_missing_port_raises(client):
         async def delete(self, obj): pass
 
     app.dependency_overrides[get_session] = _session_override(_Session())
-    no_raise_client = TestClient(app, raise_server_exceptions=False)
-    with patch("shared.audit.AuditRecorder.record"):
-        r = no_raise_client.post("/proxy", json={"host": "x.x.x.x"})  # 缺 port
-    assert r.status_code == 500
+    r = client.post("/proxy", json={"host": "x.x.x.x"})  # 缺 port
+    assert r.status_code == 422
 
 
 # ──────────────────────────────────────────────
@@ -193,8 +191,7 @@ def test_delete_proxy_happy(client):
     entry = FakeProxyEntry(pid=pid)
     session = make_fake_session(scalar_one_or_none=entry)
     app.dependency_overrides[get_session] = _session_override(session)
-    with patch("shared.audit.AuditRecorder.record"):
-        r = client.delete(f"/proxy/{pid}")
+    r = client.delete(f"/proxy/{pid}")
     assert r.status_code == 200
     assert r.json()["message"] == "Deleted"
 

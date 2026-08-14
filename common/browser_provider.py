@@ -46,9 +46,14 @@ _PROVIDER = None
 
 
 def get_browser_provider():
-    """返回全局单例 provider（当前固定 ixBrowser）。"""
+    """返回全局单例 provider。默认 ixBrowser，可用 BROWSER_PROVIDER=donut 切换。"""
     global _PROVIDER
     if _PROVIDER is None:
-        from common.ixbrowser_provider import IXBrowserProvider
-        _PROVIDER = IXBrowserProvider()
+        from config import BROWSER_PROVIDER
+        if BROWSER_PROVIDER == "donut":
+            from common.donut_provider import DonutBrowserProvider
+            _PROVIDER = DonutBrowserProvider()
+        else:
+            from common.ixbrowser_provider import IXBrowserProvider
+            _PROVIDER = IXBrowserProvider()
     return _PROVIDER

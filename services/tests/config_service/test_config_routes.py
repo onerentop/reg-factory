@@ -91,8 +91,11 @@ def test_get_history_reachable(client):
 # ── POST /config/{key}/rollback/{version_id} ─────────────────────────────────
 # POST does not conflict with GET /config/{key:path}, so rollback works correctly.
 
-def test_rollback_config_happy(client):
-    r = client.post("/config/app.name/rollback/v1")
+def test_rollback_config_happy(client, fake_service):
+    import asyncio
+
+    version_id = str(asyncio.run(fake_service.get_history("app.name"))[0].id)
+    r = client.post(f"/config/app.name/rollback/{version_id}")
     assert r.status_code == 200
     body = r.json()
     assert body["success"] is True

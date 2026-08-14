@@ -2,15 +2,10 @@
 """
 common/sms.py — 参数化接码客户端(firefox.fun 主用 + hero-sms 兜底)。
 
-逻辑搬自 register.py 的 Claude 接码函数，但把"项目号/服务号/国家偏好"做成参数，
-这样不同平台(Claude / OpenAI ...)各用各的服务号，互不影响。register.py 原样保留。
-
-⚠️ WIP：目前仅被 common/oauth_codex.handle_add_phone(Codex add-phone 自动接码)调用，
-而该路径尚未充分验证（推荐用 --manual-phone）。注意 register.py 自带一套独立接码
-(get_phone_number)，两边暂未统一；全自动接码版完善时一并收口。
+提供 Google 网页注册使用的可参数化接码函数。
 
 firefox.fun: act=getPhone/getPhoneCode/cancelPhone, iid=项目号
-hero-sms(sms-activate 兼容): action=getNumber/getStatus/setStatus, service=服务码(OpenAI 默认 dr)
+hero-sms(sms-activate 兼容): action=getNumber/getStatus/setStatus, service=服务码。
 """
 
 import re
@@ -19,9 +14,14 @@ import time
 import requests
 
 from config import (
-    SMS_API_BASE, SMS_TOKEN,
-    HERO_SMS_API_BASE, HERO_SMS_API_KEY, HERO_SMS_COUNTRY_PREFER,
+    SMS_API_BASE,
+    SMS_TOKEN,
+    HERO_SMS_API_BASE,
+    HERO_SMS_API_KEY,
+    SMS_HERO_COUNTRIES,
 )
+
+HERO_SMS_COUNTRY_PREFER = SMS_HERO_COUNTRIES
 
 
 def get_phone(project_id, hero_service, country_prefer=("",), country_blacklist=(),

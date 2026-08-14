@@ -1,4 +1,5 @@
 import asyncio
+import os
 from logging.config import fileConfig
 
 from sqlalchemy import pool
@@ -8,16 +9,17 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from alembic import context
 
 config = context.config
+if database_url := os.getenv("DATABASE_URL"):
+    config.set_main_option("sqlalchemy.url", database_url)
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # Import all models so Alembic can detect them
 from shared.base_model import BaseModel
-from shared.log_models import LogEntry
 from config_service.models import ConfigEntry, ConfigVersion
 from sms_service.models import SmsOrder, SmsPlatformConfig
 from account_service.models import Account, RegistrationStep
-from gateway.models import User, ApiKey, AuditLog, AlertRule, AlertHistory, ProxyEntry
+from gateway.models import User, ProxyEntry
 
 target_metadata = BaseModel.metadata
 
