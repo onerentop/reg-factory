@@ -9,7 +9,7 @@
 """
 from dataclasses import dataclass
 
-# 前缀顺序很重要：https:// 必须在 http:// 之前，否则 "https://..." 会被 "http://" 匹配
+# 顺序对匹配结果无影响（"https://" 不会被 "http://" 前缀误匹配，二者在第 5 字符即分叉），此处顺序仅为可读性
 _SCHEMES = ("socks5://", "https://", "http://")
 
 
@@ -38,6 +38,7 @@ def _build(proxy_type: str, host: str, port: str, user: str | None, pwd: str | N
     # 用 isascii() 防止 Unicode 数字（如 ⁵）通过 isdigit() 但在 int() 时失败
     if not port.isascii() or not port.isdigit():
         return None, "端口必须是 1-65535 之间的数字"
+    # try/except 是必要的：CPython 3.11+ 对超长数字字符串有转换长度限制，会抛 ValueError
     try:
         port_num = int(port)
     except ValueError:

@@ -82,7 +82,7 @@ def test_empty_host_is_invalid():
     """空主机地址应该被拒绝。"""
     _, invalid = parse_proxy_lines(":8080", "http")
     assert len(invalid) == 1
-    assert "主机" in invalid[0].reason or "空" in invalid[0].reason
+    assert invalid[0].reason == "主机地址不能为空"
 
 
 def test_malformed_at_form_without_port():
@@ -90,6 +90,7 @@ def test_malformed_at_form_without_port():
     drafts, invalid = parse_proxy_lines("u:p@1.2.3.4", "http")
     assert len(drafts) == 0
     assert len(invalid) == 1
+    assert invalid[0].reason == "主机地址不能为空"
 
 
 def test_scheme_with_four_field_format():
