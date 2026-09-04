@@ -1,16 +1,21 @@
-"""绑定抢占服务测试。用内存 SQLite 建真表，验证唯一约束真的拦得住。"""
+"""绑定抢占服务测试。用真实文件 SQLite 建真表，验证唯一约束真的拦得住。
+
+引擎经 DatabaseManager 创建（而非裸 create_async_engine），
+这样才会挂上 shared/database.py 里那对 isolation_level=None + 显式 BEGIN 的监听器，
+测试才真正跑在和生产一致的事务语义下——见 test_claim_rolled_back_leaves_no_binding。
+"""
 import uuid
 from datetime import date, datetime, timedelta
 
 import pytest
 import pytest_asyncio
 from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from gateway import proxy_binding_service as pbs
 from gateway.models import ProxyBinding, ProxyEntry
 from gateway.proxy_binding_service import ProxyBindingService, build_proxy_url, today_local
 from shared.base_model import BaseModel
+from shared.database import DatabaseManager
 
 
 class _FakeClock:
@@ -32,14 +37,27 @@ class _FakeClock:
 
 
 @pytest_asyncio.fixture
-async def session():
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    async with engine.begin() as conn:
+async def session(tmp_path):
+    """经 DatabaseManager 建引擎——覆盖生产事务语义，而不是裸 create_async_engine。
+
+    落文件而非 :memory:：内存库连接语义和文件库有细节差异，durability 恰恰是本文件
+    要验证的东西，落文件才和生产（真实 regfactory.db）同构，与
+    tests/shared/test_database_transactions.py 的选择保持一致。
+
+    用 manager._session_factory() 而不是 manager.get_session()：get_session() 是
+    「成功自动 commit、异常自动 rollback」的请求级包装，但这里的测试要在同一个
+    session 里反复 flush() 并跨多次调用读回未提交的状态（部分测试还会在同一个
+    session 上再建一个 ProxyBindingService），commit-on-exit 的语义并不匹配；
+    _session_factory 给的是和旧 fixture 完全对等的裸 session，只是引擎换成了
+    DatabaseManager 配置过的那个。
+    """
+    manager = DatabaseManager(url=f"sqlite+aiosqlite:///{tmp_path / 'proxy_binding.db'}")
+    async with manager.engine.begin() as conn:
         await conn.run_sync(BaseModel.metadata.create_all)
-    maker = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with maker() as s:
+    assert manager._session_factory is not None
+    async with manager._session_factory() as s:
         yield s
-    await engine.dispose()
+    await manager.close()
 
 
 async def _add_proxy(session, host="1.2.3.4", status="active"):
@@ -102,6 +120,21 @@ async def test_session_still_usable_after_conflict(session):
     await svc.claim_specific(proxy.id, "task-2", "google")
     await _add_proxy(session, host="9.9.9.9")      # 冲突后还能继续写
     await session.flush()
+
+
+async def test_claim_rolled_back_leaves_no_binding(session):
+    """claim() 的写入落在 begin_nested() 的 SAVEPOINT 里，外层 session.rollback()
+    必须真能撤销它——这正是 cfc59e8 修的坑：sqlite 驱动不接管事务的话，
+    SAVEPOINT 一 RELEASE 就直接落盘，rollback() 形同虚设，无主 binding 永久占着
+    当天配额。先 commit 代理本身，只把 claim() 这次写留在待回滚事务里，
+    这样断言只盯住 SAVEPOINT 语义，不和外层 flush 的持久性混在一起。"""
+    await _add_proxy(session)
+    await session.commit()
+    claim = await ProxyBindingService(session).claim("task-1", "google")
+    assert claim is not None
+    await session.rollback()
+    rows = (await session.execute(select(ProxyBinding))).scalars().all()
+    assert rows == []
 
 
 async def test_mark_opened_then_finalize_keeps_binding(session):
