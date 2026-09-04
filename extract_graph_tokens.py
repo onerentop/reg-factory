@@ -38,11 +38,15 @@ SCOPE = "offline_access https://outlook.office.com/IMAP.AccessAsUser.All https:/
 OUTPUT_DIR = "outlook_accounts"
 
 
-def get_graph_token(email, password, idx=0):
+def get_graph_token(email, password, idx=0, proxy=""):
     """Get refresh_token via pure HTTP OAuth flow (no browser)."""
     tag = f"[#{idx}]"
     session = requests.Session()
-    session.trust_env = True  # Use system proxy (Clash) — avoids rate-limiting on account.live.com
+    if proxy:
+        session.trust_env = False
+        session.proxies.update({"http": proxy, "https": proxy})
+    else:
+        session.trust_env = True  # Use system proxy (Clash) — avoids rate-limiting on account.live.com
     session.headers.update({
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
     })
