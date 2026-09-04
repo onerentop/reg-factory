@@ -31,9 +31,24 @@ class DatabaseManager:
                 "echo": self._echo,
                 "pool_pre_ping": True,
             }
-            if "sqlite" not in self._url:
+            is_sqlite = "sqlite" in self._url
+            if not is_sqlite:
                 kwargs["pool_size"] = self._pool_size
             self._engine = create_async_engine(self._url, **kwargs)
+            if is_sqlite:
+                from sqlalchemy import event
+
+                @event.listens_for(self._engine.sync_engine, "connect")
+                def configure_sqlite_connection(dbapi_connection, _connection_record):
+                    cursor = dbapi_connection.cursor()
+                    try:
+                        cursor.execute("PRAGMA journal_mode=WAL")
+                        cursor.execute("PRAGMA foreign_keys=ON")
+                        cursor.execute("PRAGMA busy_timeout=5000")
+                        cursor.execute("PRAGMA synchronous=NORMAL")
+                    finally:
+                        cursor.close()
+
             self._session_factory = async_sessionmaker(
                 self._engine, expire_on_commit=False
             )

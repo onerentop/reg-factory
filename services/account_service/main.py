@@ -1,5 +1,6 @@
 import os
 from contextlib import asynccontextmanager
+from uuid import UUID
 
 from fastapi import FastAPI, Depends, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,7 +11,7 @@ from shared.log_handler import setup_logger
 from shared.base_schema import ApiResponse, PaginatedResponse
 from account_service.schemas import (
     AccountCreate, AccountUpdate, StepUpdate,
-    BatchDeleteRequest, BatchExportRequest, BatchRetryRequest, ImportRequest,
+    BatchDeleteRequest, BatchExportRequest,
 )
 from account_service.service import AccountService
 from account_service.repository import AccountRepository, StepRepository
@@ -78,9 +79,9 @@ async def list_accounts(
     })
 
 
-@app.get("/accounts/{account_id}", response_model=ApiResponse)
-async def get_account(account_id: str, service: AccountService = Depends(get_service)):
-    account = await service.get_account(account_id)
+@app.get("/accounts/{account_id:uuid}", response_model=ApiResponse)
+async def get_account(account_id: UUID, service: AccountService = Depends(get_service)):
+    account = await service.get_account(str(account_id))
     if account is None:
         raise HTTPException(status_code=404, detail="Account not found")
     return ApiResponse(data=account.model_dump())
@@ -92,17 +93,17 @@ async def create_account(body: AccountCreate, service: AccountService = Depends(
     return ApiResponse(data=account.model_dump())
 
 
-@app.put("/accounts/{account_id}", response_model=ApiResponse)
-async def update_account(account_id: str, body: AccountUpdate, service: AccountService = Depends(get_service)):
-    account = await service.update_account(account_id, body)
+@app.put("/accounts/{account_id:uuid}", response_model=ApiResponse)
+async def update_account(account_id: UUID, body: AccountUpdate, service: AccountService = Depends(get_service)):
+    account = await service.update_account(str(account_id), body)
     if account is None:
         raise HTTPException(status_code=404, detail="Account not found")
     return ApiResponse(data=account.model_dump())
 
 
-@app.delete("/accounts/{account_id}", response_model=ApiResponse)
-async def delete_account(account_id: str, service: AccountService = Depends(get_service)):
-    deleted = await service.delete_account(account_id)
+@app.delete("/accounts/{account_id:uuid}", response_model=ApiResponse)
+async def delete_account(account_id: UUID, service: AccountService = Depends(get_service)):
+    deleted = await service.delete_account(str(account_id))
     if not deleted:
         raise HTTPException(status_code=404, detail="Account not found")
     return ApiResponse(message="Deleted")
@@ -122,29 +123,20 @@ async def batch_export(body: BatchExportRequest, service: AccountService = Depen
     return ApiResponse(data={"content": content, "format": body.format})
 
 
-@app.post("/accounts/batch/retry", response_model=ApiResponse)
-async def batch_retry(body: BatchRetryRequest, service: AccountService = Depends(get_service)):
-    return ApiResponse(data={"queued": len(body.account_ids), "message": "Retry tasks queued"})
 
-
-@app.get("/accounts/{account_id}/steps", response_model=ApiResponse)
-async def get_steps(account_id: str, service: AccountService = Depends(get_service)):
-    steps = await service.get_steps(account_id)
+@app.get("/accounts/{account_id:uuid}/steps", response_model=ApiResponse)
+async def get_steps(account_id: UUID, service: AccountService = Depends(get_service)):
+    steps = await service.get_steps(str(account_id))
     return ApiResponse(data=[s.model_dump() for s in steps])
 
 
-@app.put("/accounts/{account_id}/steps/{step_number}", response_model=ApiResponse)
+@app.put("/accounts/{account_id:uuid}/steps/{step_number}", response_model=ApiResponse)
 async def update_step(
-    account_id: str, step_number: int, body: StepUpdate,
+    account_id: UUID, step_number: int, body: StepUpdate,
     service: AccountService = Depends(get_service),
 ):
-    updated = await service.update_step(account_id, step_number, body)
+    updated = await service.update_step(str(account_id), step_number, body)
     if not updated:
         raise HTTPException(status_code=404, detail="Step not found")
     return ApiResponse(message="Step updated")
 
-
-@app.post("/accounts/import", response_model=ApiResponse)
-async def import_accounts(body: ImportRequest, service: AccountService = Depends(get_service)):
-    count = await service.import_accounts(body.content, body.format, body.platform)
-    return ApiResponse(data={"imported": count})

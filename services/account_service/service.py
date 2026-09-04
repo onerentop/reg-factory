@@ -5,7 +5,6 @@ from account_service.models import AccountPlatform, AccountStatus, StepStatus
 from account_service.repository import AccountRepository, StepRepository
 from account_service.schemas import AccountRead, StepRead, AccountCreate, AccountUpdate, StepUpdate
 from account_service.exporter import ExporterFactory
-from account_service.importer import AccountImporter
 
 
 class AccountService:
@@ -95,20 +94,6 @@ class AccountService:
         exporter = ExporterFactory.get(format_name)
         return exporter.export(data)
 
-    async def import_accounts(self, content: str, format_name: str, platform: str) -> int:
-        parsed = AccountImporter.parse(content, format_name, platform)
-        count = 0
-        for item in parsed:
-            await self._account_repo.create(
-                email=item["email"],
-                password=item.get("password"),
-                platform=AccountPlatform(item["platform"]),
-                status=AccountStatus.SUCCESS,
-                total_steps=0,
-                tokens=item.get("tokens"),
-            )
-            count += 1
-        return count
 
     def _to_read(self, account) -> AccountRead:
         steps = []

@@ -1,5 +1,4 @@
 import json
-import asyncio
 import logging
 from typing import Any, Callable
 
@@ -7,7 +6,7 @@ logger = logging.getLogger(__name__)
 
 
 class ConfigClient:
-    """配置热更新客户端。观察者模式——订阅 Redis 配置变更通知。"""
+    """配置热更新客户端。观察者模式——在进程内分发配置变更。"""
 
     def __init__(self, config_service_url: str = "http://localhost:8003"):
         self._config_url = config_service_url
@@ -42,18 +41,9 @@ class ConfigClient:
         except Exception as e:
             logger.warning(f"Failed to load config from service: {e}")
 
-    async def start_watching(self, redis_url: str = "redis://localhost:6379/0") -> None:
-        import redis.asyncio as aioredis
-        try:
-            r = aioredis.from_url(redis_url)
-            pubsub = r.pubsub()
-            await pubsub.subscribe("config:updated")
-            logger.info("Subscribed to config:updated channel")
-            async for message in pubsub.listen():
-                if message["type"] == "message":
-                    await self._handle_update(message["data"])
-        except Exception as e:
-            logger.error(f"Config watcher error: {e}")
+    async def start_watching(self, _unused_url: str | None = None) -> None:
+        """兼容旧调用：本机单体无外部 Pub/Sub，配置由领域服务直接读取。"""
+        logger.info("Config watcher is disabled in the local monolith")
 
     async def _handle_update(self, raw_data: bytes) -> None:
         try:

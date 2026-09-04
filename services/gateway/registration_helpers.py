@@ -7,4 +7,4 @@ def resolve_registration_mode(body: dict) -> str:
     优先级：body 顶层 mode（前端下拉）→ config.mode → 默认 "browser"。
     """
     config = body.get("config") or {}
-    return body.get("mode", config.get("mode", "browser"))
+    return body.get("mode") or config.get("mode") or "browser"

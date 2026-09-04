@@ -32,7 +32,7 @@ class LegacyBridge:
     @staticmethod
     def _patch_stdio() -> None:
         """旧脚本顶层有 sys.stdout/stdin.reconfigure()，
-        pytest 和 Celery Worker 的 IO 代理不支持该方法。"""
+        pytest 等测试运行器的 IO 代理不支持该方法。"""
         if not hasattr(sys.stdin, "reconfigure"):
             sys.stdin = open(os.devnull, "r")
         if not hasattr(sys.stdout, "reconfigure"):

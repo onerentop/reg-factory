@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Literal
 from datetime import datetime
 from pydantic import BaseModel, Field
 
@@ -31,7 +31,7 @@ class AccountRead(BaseModel):
 class AccountCreate(BaseModel):
     email: str = Field(min_length=1)
     password: str | None = None
-    platform: str = Field(min_length=1)
+    platform: Literal["outlook", "google"]
     total_steps: int = 0
     proxy_used: str | None = None
     browser_provider: str | None = None
@@ -53,9 +53,6 @@ class StepUpdate(BaseModel):
     duration_ms: int | None = None
 
 
-class BatchRetryRequest(BaseModel):
-    account_ids: list[str]
-
 
 class BatchDeleteRequest(BaseModel):
     account_ids: list[str]
@@ -67,8 +64,3 @@ class BatchExportRequest(BaseModel):
     platform: str | None = None
     status: str | None = None
 
-
-class ImportRequest(BaseModel):
-    platform: str
-    format: str = "txt"
-    content: str

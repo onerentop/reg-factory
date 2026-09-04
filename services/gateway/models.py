@@ -1,4 +1,15 @@
-from sqlalchemy import Column, String, JSON, Boolean, Integer, DateTime
+from sqlalchemy import (
+    Column,
+    String,
+    JSON,
+    Boolean,
+    Integer,
+    DateTime,
+    ForeignKey,
+    Index,
+    Text,
+    UniqueConstraint,
+)
 from datetime import datetime, timezone
 
 from shared.base_model import BaseModel, TimestampMixin
@@ -13,46 +24,6 @@ class User(TimestampMixin, BaseModel):
     is_active = Column(Boolean, nullable=False, default=True)
 
 
-class ApiKey(TimestampMixin, BaseModel):
-    __tablename__ = "api_keys"
-
-    key = Column(String(64), unique=True, nullable=False, index=True)
-    name = Column(String(100), nullable=False)
-    owner_id = Column(String(36), nullable=False)
-    scopes = Column(JSON, nullable=False, default=list)
-    is_active = Column(Boolean, nullable=False, default=True)
-    last_used_at = Column(DateTime(timezone=True), nullable=True)
-    call_count = Column(Integer, nullable=False, default=0)
-
-
-class AuditLog(TimestampMixin, BaseModel):
-    __tablename__ = "audit_logs"
-
-    operator = Column(String(100), nullable=False, index=True)
-    action = Column(String(50), nullable=False, index=True)
-    target = Column(String(255), nullable=True)
-    before_value = Column(JSON, nullable=True)
-    after_value = Column(JSON, nullable=True)
-    ip_address = Column(String(45), nullable=True)
-
-
-class AlertRule(TimestampMixin, BaseModel):
-    __tablename__ = "alert_rules"
-
-    name = Column(String(100), nullable=False)
-    rule_type = Column(String(50), nullable=False)
-    threshold = Column(String(50), nullable=True)
-    enabled = Column(Boolean, nullable=False, default=True)
-    notify_channels = Column(JSON, nullable=False, default=list)
-
-
-class AlertHistory(TimestampMixin, BaseModel):
-    __tablename__ = "alert_history"
-
-    rule_name = Column(String(100), nullable=False)
-    rule_type = Column(String(50), nullable=False)
-    message = Column(String(500), nullable=False)
-    resolved = Column(Boolean, nullable=False, default=False)
 
 
 class ProxyEntry(TimestampMixin, BaseModel):
@@ -65,3 +36,43 @@ class ProxyEntry(TimestampMixin, BaseModel):
     password = Column(String(100), nullable=True)
     status = Column(String(20), nullable=False, default="unknown")
     region = Column(String(20), nullable=True)
+
+
+class RegistrationJob(TimestampMixin, BaseModel):
+    """本机任务的持久化投影，可审计其最终状态。"""
+    __tablename__ = "registration_jobs"
+
+    task_id = Column(String(64), unique=True, nullable=False, index=True)
+    platform = Column(String(32), nullable=False, index=True)
+    status = Column(String(20), nullable=False, default="queued", index=True)
+    result = Column(JSON, nullable=True)
+    error_message = Column(String(1000), nullable=True)
+    last_event_seq = Column(Integer, nullable=False, default=0, server_default="0")
+
+
+class TaskEvent(BaseModel):
+    """父 API 进程写入的任务事件审计流；seq 是断线回放游标。"""
+    __tablename__ = "task_events"
+    __table_args__ = (
+        UniqueConstraint("task_id", "seq", name="uq_task_events_task_id_seq"),
+        Index("ix_task_events_task_id_seq", "task_id", "seq"),
+    )
+
+    task_id = Column(
+        String(64),
+        ForeignKey("registration_jobs.task_id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    seq = Column(Integer, nullable=False)
+    event_type = Column(String(20), nullable=False)
+    status = Column(String(20), nullable=True)
+    level = Column(String(10), nullable=True)
+    message = Column(Text, nullable=True)
+    data = Column(JSON, nullable=True)
+    created_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        index=True,
+    )

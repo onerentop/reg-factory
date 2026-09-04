@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from shared.base_schema import ApiResponse
 from gateway.models import ProxyEntry
 from gateway.deps import get_session
+from gateway.schemas import ProxyStatusUpdate, ProxyUpdate, ProxyWrite
 
 router = APIRouter()
 
@@ -15,27 +16,26 @@ async def list_proxies(session: AsyncSession = Depends(get_session)):
     proxies = result.scalars().all()
     return ApiResponse(data=[{
         "id": str(p.id), "type": p.type, "host": p.host, "port": p.port,
-        "username": p.username, "password": p.password, "status": p.status,
+        "username": p.username, "has_password": bool(p.password), "status": p.status,
+        "region": p.region,
     } for p in proxies])
 
 
 @router.post("/proxy", response_model=ApiResponse)
-async def add_proxy(body: dict, session: AsyncSession = Depends(get_session)):
+async def add_proxy(body: ProxyWrite, session: AsyncSession = Depends(get_session)):
     proxy = ProxyEntry(
-        type=body.get("type", "socks5"), host=body["host"], port=int(body["port"]),
-        username=body.get("username"), password=body.get("password"),
-        region=body.get("region"), status=body.get("status", "active"),
+        type=body.type, host=body.host, port=body.port,
+        username=body.username, password=body.password,
+        region=body.region, status=body.status,
     )
     session.add(proxy)
     await session.flush()
     await session.refresh(proxy)
-    from shared.audit import AuditRecorder
-    AuditRecorder().record(operator="system", action="add_proxy", target=body.get("host", ""))
     return ApiResponse(data={"id": str(proxy.id)})
 
 
 @router.put("/proxy/{proxy_id}", response_model=ApiResponse)
-async def update_proxy(proxy_id: str, body: dict, session: AsyncSession = Depends(get_session)):
+async def update_proxy(proxy_id: str, body: ProxyUpdate, session: AsyncSession = Depends(get_session)):
     """修改代理配置。"""
     import uuid
     from sqlalchemy import select
@@ -44,9 +44,9 @@ async def update_proxy(proxy_id: str, body: dict, session: AsyncSession = Depend
     proxy = result.scalar_one_or_none()
     if proxy is None:
         raise HTTPException(status_code=404, detail="Proxy not found")
-    for field in ("type", "host", "port", "username", "password"):
-        if field in body:
-            setattr(proxy, field, int(body[field]) if field == "port" else body[field])
+    for field, value in body.model_dump(exclude_unset=True).items():
+        if value is not None:
+            setattr(proxy, field, value)
     await session.flush()
     return ApiResponse(data={"id": str(proxy.id)})
 
@@ -62,9 +62,6 @@ async def delete_proxy(proxy_id: str, session: AsyncSession = Depends(get_sessio
         raise HTTPException(status_code=404, detail="Proxy not found")
     await session.delete(proxy)
     await session.flush()
-    from shared.audit import AuditRecorder
-    recorder = AuditRecorder()
-    recorder.record(operator="system", action="delete_proxy", target=proxy_id)
     return ApiResponse(message="Deleted")
 
 
@@ -91,7 +88,7 @@ async def test_proxy(proxy_id: str, session: AsyncSession = Depends(get_session)
 
 
 @router.put("/proxy/{proxy_id}/status", response_model=ApiResponse)
-async def update_proxy_status(proxy_id: str, body: dict, session: AsyncSession = Depends(get_session)):
+async def update_proxy_status(proxy_id: str, body: ProxyStatusUpdate, session: AsyncSession = Depends(get_session)):
     import uuid
     from sqlalchemy import select
     stmt = select(ProxyEntry).where(ProxyEntry.id == uuid.UUID(proxy_id))
@@ -99,6 +96,6 @@ async def update_proxy_status(proxy_id: str, body: dict, session: AsyncSession =
     proxy = result.scalar_one_or_none()
     if proxy is None:
         raise HTTPException(status_code=404, detail="Proxy not found")
-    proxy.status = body.get("status", proxy.status)
+    proxy.status = body.status
     await session.flush()
     return ApiResponse(data={"id": str(proxy.id), "status": proxy.status})

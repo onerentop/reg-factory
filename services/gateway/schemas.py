@@ -1,5 +1,4 @@
 from typing import Any
-from datetime import datetime
 from pydantic import BaseModel, Field
 
 
@@ -15,61 +14,35 @@ class LoginResponse(BaseModel):
     username: str
 
 
-class UserRead(BaseModel):
-    id: str
-    username: str
-    role: str
-    is_active: bool
-    created_at: datetime | None = None
-    model_config = {"from_attributes": True}
 
 
-class UserCreate(BaseModel):
-    username: str = Field(min_length=3, max_length=100)
-    password: str = Field(min_length=6)
-    role: str = "readonly"
+class ProxyWrite(BaseModel):
+    type: str = Field(default="socks5", pattern="^(http|https|socks5)$")
+    host: str = Field(min_length=1, max_length=255)
+    port: int = Field(ge=1, le=65535)
+    username: str | None = Field(default=None, max_length=100)
+    password: str | None = Field(default=None, max_length=100)
+    region: str | None = Field(default=None, max_length=20)
+    status: str = Field(default="active", max_length=20)
 
 
-class ApiKeyRead(BaseModel):
-    id: str
-    key: str
-    name: str
-    scopes: list[str]
-    is_active: bool
-    last_used_at: datetime | None = None
-    call_count: int
-    model_config = {"from_attributes": True}
+class ProxyUpdate(BaseModel):
+    type: str | None = Field(default=None, pattern="^(http|https|socks5)$")
+    host: str | None = Field(default=None, min_length=1, max_length=255)
+    port: int | None = Field(default=None, ge=1, le=65535)
+    username: str | None = Field(default=None, max_length=100)
+    password: str | None = Field(default=None, max_length=100)
+    status: str | None = Field(default=None, max_length=20)
 
 
-class ApiKeyCreate(BaseModel):
-    name: str = Field(min_length=1)
-    scopes: list[str] = []
+class ProxyStatusUpdate(BaseModel):
+    status: str = Field(min_length=1, max_length=20)
 
 
-class AuditLogRead(BaseModel):
-    operator: str
-    action: str
-    target: str | None = None
-    before_value: Any | None = None
-    after_value: Any | None = None
-    ip_address: str | None = None
-    created_at: datetime | None = None
-    model_config = {"from_attributes": True}
-
-
-class AlertRuleRead(BaseModel):
-    id: str
-    name: str
-    rule_type: str
-    threshold: str | None = None
-    enabled: bool
-    notify_channels: list[str]
-    model_config = {"from_attributes": True}
-
-
-class AlertRuleWrite(BaseModel):
-    name: str
-    rule_type: str
-    threshold: str | None = None
-    enabled: bool = True
-    notify_channels: list[str] = []
+class RegistrationRequest(BaseModel):
+    count: int = Field(default=1, ge=1, le=20)
+    # 兼容 API 调用方直接提供的代理；浏览器 UI 应传 proxy_id，避免暴露密码。
+    proxy: str = Field(default="", max_length=1024)
+    proxy_id: str | None = Field(default=None, max_length=36)
+    config: dict[str, Any] = Field(default_factory=dict)
+    mode: str | None = Field(default=None, max_length=32)

@@ -1,4 +1,6 @@
 from typing import Any
+from uuid import UUID
+
 from pydantic import BaseModel, Field
 
 
@@ -18,6 +20,7 @@ class ConfigWrite(BaseModel):
 
 
 class ConfigVersionRead(BaseModel):
+    id: UUID
     config_key: str
     old_value: Any | None
     new_value: Any

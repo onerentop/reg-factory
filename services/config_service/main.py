@@ -103,19 +103,10 @@ async def delete_config(key: str, service: ConfigService = Depends(get_service))
 async def rollback_config(
     key: str, version_id: str, service: ConfigService = Depends(get_service)
 ):
-    """回滚配置到指定版本。"""
-    import uuid
+    """回滚配置到指定历史版本，而不是忽略客户端提供的 version_id。"""
     versions = await service.get_history(key)
-    target = next((v for v in versions if str(v.config_key) == key), None)
-    if not versions:
-        raise HTTPException(status_code=404, detail="No versions found")
-    # 使用第一个匹配的历史版本的值重新设置
-    for v in versions:
-        # version_id 在实际中应匹配 version 记录的 ID
-        pass
-    # 简化实现：回滚到最近的上一个版本
-    if len(versions) >= 2:
-        prev = versions[1]  # index 0 是最新，1 是上一个
-        result = await service.set(key, prev.new_value, changed_by="rollback")
-        return ApiResponse(data=result.model_dump(), message="Rolled back")
-    raise HTTPException(status_code=400, detail="No previous version to rollback to")
+    target = next((version for version in versions if str(version.id) == version_id), None)
+    if target is None:
+        raise HTTPException(status_code=404, detail="Config version not found")
+    result = await service.set(key, target.new_value, changed_by="rollback")
+    return ApiResponse(data=result.model_dump(), message="Rolled back")

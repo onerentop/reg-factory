@@ -1,7 +1,7 @@
-"""功能扫描：对运行中的 services 栈做一遍——打每个 live 端点 + 触发每个 Celery 任务，
-逐功能报 PASS/FAIL/ERROR/GATED。见 docs/superpowers/specs/2026-06-12-feature-sweep-design.md。
+"""功能扫描：检查运行中的本机单体 HTTP 端点。
 
-跑法（从 services/ 目录，栈需先起来）：
+扫描不投递浏览器自动化或其他可能产生外部副作用的任务。
+跑法（从 services/ 目录）：
     python scripts/feature_sweep.py
 """
 
@@ -16,11 +16,7 @@ from dataclasses import dataclass, field, asdict
 import httpx
 
 GATEWAY = os.getenv("GATEWAY_URL", "http://127.0.0.1:8000")
-SMS = os.getenv("SMS_URL", "http://127.0.0.1:8001")
-ACCOUNT = os.getenv("ACCOUNT_URL", "http://127.0.0.1:8002")
-CONFIG = os.getenv("CONFIG_URL", "http://127.0.0.1:8003")
-REDIS_URL = os.getenv("REDIS_URL", "redis://127.0.0.1:6379/0")
-SERVICES = {"gateway": GATEWAY, "sms": SMS, "account": ACCOUNT, "config": CONFIG}
+SERVICES = {"regfactory": GATEWAY}
 
 
 @dataclass
@@ -72,8 +68,7 @@ class Sweep:
     # ---------- 功能组 ----------
 
     def sweep_health(self):
-        for name, base in SERVICES.items():
-            self.call("health", f"{name}/health", "GET", base, "/health")
+        self.call("health", "regfactory/health", "GET", GATEWAY, "/health")
 
     def sweep_auth(self):
         # 登录（尝试常见默认凭据；拿到 token 供后续 admin 端点）
@@ -138,27 +133,29 @@ class Sweep:
 
     def sweep_accounts(self):
         email = f"_sweep_{int(time.time())}@outlook.com"
-        r = self.call("accounts", "create_account", "POST", ACCOUNT, "/accounts",
-                      json_body={"email": email, "password": "Sweep!123", "platform": "outlook"},
-                      ok=range(200, 300), gated_on=(422,))
-        self.call("accounts", "list_accounts", "GET", ACCOUNT, "/accounts")
-        aid = None
+        r = self.call(
+            "accounts", "create_account", "POST", GATEWAY, "/accounts",
+            json_body={"email": email, "password": "Sweep!123", "platform": "outlook"},
+            ok=range(200, 300), gated_on=(422,)
+        )
+        self.call("accounts", "list_accounts", "GET", GATEWAY, "/accounts")
+        account_id = None
         if r is not None and r.status_code < 300:
             try:
-                aid = r.json().get("data", {}).get("id")
+                account_id = r.json().get("data", {}).get("id")
             except Exception:
                 pass
-        if aid:
-            self.call("accounts", "get_account", "GET", ACCOUNT, f"/accounts/{aid}")
-            self.call("accounts", "update_account", "PUT", ACCOUNT, f"/accounts/{aid}",
+        if account_id:
+            self.call("accounts", "get_account", "GET", GATEWAY, f"/accounts/{account_id}")
+            self.call("accounts", "update_account", "PUT", GATEWAY, f"/accounts/{account_id}",
                       json_body={"status": "success"}, ok=range(200, 300), gated_on=(422,))
-            self.call("accounts", "delete_account(cleanup)", "DELETE", ACCOUNT, f"/accounts/{aid}")
+            self.call("accounts", "delete_account(cleanup)", "DELETE", GATEWAY, f"/accounts/{account_id}")
 
     def sweep_forwarding(self):
-        # gateway 转发到各服务
-        self.call("forwarding", "fwd /accounts", "GET", GATEWAY, "/accounts", gated_on=(502, 504))
-        self.call("forwarding", "fwd /sms/health", "GET", GATEWAY, "/sms/health", gated_on=(404, 502, 504))
-        self.call("forwarding", "fwd /config/health", "GET", GATEWAY, "/config/health", gated_on=(404, 502, 504))
+        """兼容名称：单体内调用，不再存在跨服务 HTTP forwarding。"""
+        self.call("monolith", "accounts", "GET", GATEWAY, "/accounts")
+        self.call("monolith", "sms/health", "GET", GATEWAY, "/sms/health", gated_on=(404,))
+        self.call("monolith", "config/health", "GET", GATEWAY, "/config/health", gated_on=(404,))
 
     def discover_gets(self):
         """拉每个服务 openapi，自动打所有无必填 path 参数的 GET 路由（覆盖剩余只读端点）。"""
@@ -178,59 +175,32 @@ class Sweep:
                 self.call(f"{name}:auto-GET", f"{name}{path}", "GET", base, path, gated_on=(401, 403))
 
     def sweep_tasks(self):
-        os.environ.setdefault("REDIS_URL", REDIS_URL)
-        try:
-            from worker.tasks import celery_app
-        except Exception as e:
-            self.rows.append(Row("tasks", "import celery_app", "-", "worker.tasks", None, "ERROR", str(e)[:80]))
-            return
-        # 非浏览器任务：真发真等结果
-        safe = ["check_proxy_health", "check_sms_balance", "cleanup_old_logs"]
-        for name in safe:
-            t0 = time.monotonic()
-            try:
-                res = celery_app.send_task(name)
-                out = res.get(timeout=15)
-                ms = int((time.monotonic() - t0) * 1000)
-                self.rows.append(Row("tasks", name, "task", "celery", None, "PASS", str(out)[:90], ms))
-            except Exception as e:
-                ms = int((time.monotonic() - t0) * 1000)
-                self.rows.append(Row("tasks", name, "task", "celery", None, "FAIL", f"{type(e).__name__}: {str(e)[:70]}", ms))
-        # 其余任务：验证可入队（send 成功 = 已注册可路由），不等长结果
-        queue_only = ["planned_registration", "register_account", "register_all_platforms",
-                      "retry_from_step", "unlock_outlook_account", "validate_session_key", "activate_plus_account",
-                      "full_flow"]
-        for name in queue_only:
-            try:
-                res = celery_app.send_task(name, kwargs={}) if name in ("planned_registration",) else celery_app.send_task(name, args=[], kwargs={})
-                self.rows.append(Row("tasks", f"{name}(enqueue)", "task", "celery", None, "PASS", f"queued id={res.id[:8]}", 0))
-            except Exception as e:
-                self.rows.append(Row("tasks", f"{name}(enqueue)", "task", "celery", None, "FAIL", str(e)[:70]))
+        """确认本机任务 API 存在，但不提交任何真实自动化任务。"""
+        self.rows.append(
+            Row(
+                "tasks",
+                "local-task-runtime",
+                "-",
+                "in-process",
+                None,
+                "SKIP",
+                "为避免外部副作用，扫描不投递任务；请通过 GET /tasks/{task_id} 查询既有任务。",
+            )
+        )
 
     def sweep_registration(self):
-        os.environ.setdefault("REDIS_URL", REDIS_URL)
-        try:
-            from worker.tasks import celery_app
-        except Exception as e:
-            self.rows.append(Row("registration", "register_outlook_single", "task", "celery", None, "ERROR", str(e)[:80]))
-            return
-        t0 = time.monotonic()
-        try:
-            res = celery_app.send_task("register_outlook_single", kwargs={"idx": 0, "proxy": "", "config": {}})
-            try:
-                out = res.get(timeout=25)  # 预期失败在 ixBrowser/proxy 处
-                ms = int((time.monotonic() - t0) * 1000)
-                # 走到执行并返回（成功或失败结果）= 基础设施通
-                self.rows.append(Row("registration", "register_outlook_single", "task", "celery", None, "GATED",
-                                     f"执行返回(需ixBrowser/IP真出号): {str(out)[:70]}", ms))
-            except Exception as e:
-                ms = int((time.monotonic() - t0) * 1000)
-                # 超时/执行异常 = 走到了执行层、卡在浏览器/IP gate
-                self.rows.append(Row("registration", "register_outlook_single", "task", "celery", None, "GATED",
-                                     f"走到执行层卡gate(ixBrowser/IP): {type(e).__name__} {str(e)[:50]}", ms))
-        except Exception as e:
-            self.rows.append(Row("registration", "register_outlook_single", "task", "celery", None, "FAIL",
-                                 f"入队失败: {str(e)[:70]}"))
+        """注册流程仅可在人工受控环境执行，功能扫描明确跳过。"""
+        self.rows.append(
+            Row(
+                "registration",
+                "browser-automation",
+                "-",
+                "local-process-pool",
+                None,
+                "SKIP",
+                "不执行真实注册、代理轮换、验证码或浏览器自动化。",
+            )
+        )
 
     # ---------- 运行 & 报告 ----------
 
