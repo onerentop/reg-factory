@@ -94,4 +94,12 @@ framework/.playwright/
 
 # 代理文件（含凭据，绝不提交）
 proxies_*.txt
+*_proxies.txt
+Webshare_*.txt
 services/data/
+
+# 工具运行时目录（非项目代码）
+.claude/
+.claude-flow/
+.serena/
+.playwright-mcp/
