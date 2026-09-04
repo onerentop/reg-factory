@@ -5,6 +5,7 @@ from sqlalchemy import (
     Boolean,
     Integer,
     DateTime,
+    Date,
     ForeignKey,
     Index,
     Text,
@@ -76,3 +77,26 @@ class TaskEvent(BaseModel):
         default=lambda: datetime.now(timezone.utc),
         index=True,
     )
+
+
+class ProxyBinding(TimestampMixin, BaseModel):
+    """代理与 ixBrowser 窗口的当天绑定。
+
+    UNIQUE(proxy_id, bound_date) 在数据库层保证「当天一个 IP 只绑一个窗口」，
+    不依赖应用层的先查后插。bound_date 用本地自然日，与 TimestampMixin 的 UTC 时间戳不同。
+    """
+    __tablename__ = "proxy_bindings"
+    __table_args__ = (
+        UniqueConstraint("proxy_id", "bound_date", name="uq_proxy_bindings_proxy_date"),
+        Index("ix_proxy_bindings_proxy_date", "proxy_id", "bound_date"),
+    )
+
+    proxy_id = Column(
+        ForeignKey("proxy_entries.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    bound_date = Column(Date, nullable=False)
+    task_id = Column(String(64), nullable=True, index=True)
+    profile_id = Column(String(32), nullable=True)
+    profile_name = Column(String(255), nullable=True)
+    platform = Column(String(32), nullable=True)
+    status = Column(String(20), nullable=False, default="claimed")
