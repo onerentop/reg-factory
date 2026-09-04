@@ -13,42 +13,6 @@ SUPPORTED_MODES = {
 }
 
 
-def _proxy_url(proxy) -> str:
-    """仅在服务端将代理记录组装为连接串，密码绝不返回浏览器。"""
-    auth = f"{proxy.username}:{proxy.password}@" if proxy.username and proxy.password else ""
-    return f"{proxy.type or 'socks5'}://{auth}{proxy.host}:{proxy.port}"
-
-
-async def _pick_active_proxy(session: AsyncSession) -> str:
-    """从单体数据库选取可用代理，避免通过 HTTP 回环读取代理配置。"""
-    import random
-    from sqlalchemy import select
-    from gateway.models import ProxyEntry
-
-    result = await session.execute(select(ProxyEntry))
-    available = [proxy for proxy in result.scalars().all() if proxy.status in ("active", "available")]
-    return _proxy_url(random.choice(available)) if available else ""
-
-
-async def _resolve_proxy(session: AsyncSession, proxy_id: str | None, proxy: str) -> str:
-    """优先解析 UI 提交的代理 ID，保留旧 API 的显式代理串兼容性。"""
-    if proxy_id:
-        import uuid
-        from sqlalchemy import select
-        from gateway.models import ProxyEntry
-
-        try:
-            identifier = uuid.UUID(proxy_id)
-        except ValueError as error:
-            raise HTTPException(status_code=422, detail="Invalid proxy_id") from error
-        result = await session.execute(select(ProxyEntry).where(ProxyEntry.id == identifier))
-        selected = result.scalar_one_or_none()
-        if selected is None:
-            raise HTTPException(status_code=404, detail="Proxy not found")
-        return _proxy_url(selected)
-    return proxy or await _pick_active_proxy(session)
-
-
 @router.post("/register/{platform}", response_model=ApiResponse)
 async def trigger_registration(
     platform: str,
@@ -90,24 +54,68 @@ async def trigger_registration(
             import logging
             logging.getLogger(__name__).warning("gmail_sms_config 拉取失败，跳过接码配置注入: %s", error)
 
-    proxy = await _resolve_proxy(session, body.proxy_id, body.proxy)
+    # 「当天一 IP 一窗口」：代理不再在循环外解析一次共享给整批，
+    # 而是每个任务各抢一个当天未被占用的 IP。
+    from gateway.proxy_binding_service import ACTIVE_STATUSES, ProxyBindingService
+
+    binding_service = ProxyBindingService(session)
+
+    if body.proxy_id:
+        if body.count > 1:
+            raise HTTPException(status_code=422, detail="手动指定代理时数量只能为 1")
+        selected = await binding_service.get_proxy(body.proxy_id)
+        if selected is None:
+            raise HTTPException(status_code=404, detail="Proxy not found")
+        if selected.status not in ACTIVE_STATUSES:
+            raise HTTPException(status_code=422, detail="该代理当前不可用")
+
     job_service = RegistrationJobService(session)
-    task_ids = []
+    task_ids: list[str] = []
+    skipped = 0
     for index in range(body.count):
         task_id = str(uuid.uuid4())
+        if body.proxy_id:
+            claim = await binding_service.claim_specific(body.proxy_id, task_id, platform)
+            if claim is None:
+                raise HTTPException(status_code=409, detail="该代理今日已绑定窗口")
+            proxy_url = claim.proxy_url
+        elif body.proxy:
+            # 裸连接串：该代理在库里没有记录，无法建立绑定，因此不受「当天一 IP 一窗口」约束。
+            # 保留此路径是为兼容直接调 API 的调用方；浏览器 UI 始终走 proxy_id。
+            proxy_url = body.proxy
+        else:
+            claim = await binding_service.claim(task_id, platform)
+            if claim is None:
+                skipped = body.count - index      # 池子见底，已派发的照常跑
+                break
+            proxy_url = claim.proxy_url
+
         await job_service.enqueue(task_id, platform)
-        # 先提交 queued 事务，子进程事件才能安全地由独立会话更新该 Job。
+        # binding 与 queued Job 必须同事务提交，否则「抢到 IP 但任务没落库」会留下
+        # 永不回收的悬挂占用。提交后子进程事件才能安全地由独立会话更新该 Job。
         if session is not None:
             await session.commit()
         await runtime.submit_registration(
             task_id,
             platform=platform,
             idx=index,
-            proxy=proxy,
+            proxy=proxy_url,
             config=config,
         )
         task_ids.append(task_id)
-    return ApiResponse(data={"task_ids": task_ids, "status": "queued", "count": body.count})
+
+    return ApiResponse(
+        data={
+            "task_ids": task_ids,
+            "status": "queued",
+            "count": body.count,
+            "dispatched": len(task_ids),
+            "skipped": skipped,
+            "message": (
+                f"当天可用 IP 不足，已启动 {len(task_ids)}/{body.count}" if skipped else None
+            ),
+        }
+    )
 
 
 @router.get("/tasks/{task_id}", response_model=ApiResponse)
