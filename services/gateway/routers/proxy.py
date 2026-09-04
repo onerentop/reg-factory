@@ -4,7 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from shared.base_schema import ApiResponse
 from gateway.models import ProxyEntry
 from gateway.deps import get_session
-from gateway.schemas import ProxyStatusUpdate, ProxyUpdate, ProxyWrite
+from gateway.schemas import ProxyImportRequest, ProxyStatusUpdate, ProxyUpdate, ProxyWrite
 
 router = APIRouter()
 
@@ -99,3 +99,38 @@ async def update_proxy_status(proxy_id: str, body: ProxyStatusUpdate, session: A
     proxy.status = body.status
     await session.flush()
     return ApiResponse(data={"id": str(proxy.id), "status": proxy.status})
+
+
+@router.post("/proxy/import", response_model=ApiResponse)
+async def import_proxies(body: ProxyImportRequest, session: AsyncSession = Depends(get_session)):
+    """批量导入代理文本。按 (host, port) 去重，逐行报告非法项。"""
+    from sqlalchemy import select
+    from gateway.proxy_import import parse_proxy_lines
+
+    drafts, invalid = parse_proxy_lines(body.text, body.type)
+
+    existing: set[tuple[str, int]] = set()
+    if body.skip_duplicates:
+        result = await session.execute(select(ProxyEntry))
+        existing = {(p.host, int(p.port)) for p in result.scalars().all()}
+
+    imported, duplicates = 0, 0
+    for draft in drafts:
+        if (draft.host, draft.port) in existing:
+            duplicates += 1
+            continue
+        # status 必须显式设 active：模型默认 'unknown' 不在可抢占状态里，
+        # 漏设会让导入的代理永远分配不出去且无任何报错。
+        session.add(ProxyEntry(
+            type=draft.type, host=draft.host, port=draft.port,
+            username=draft.username, password=draft.password, status="active",
+        ))
+        existing.add((draft.host, draft.port))
+        imported += 1
+    await session.flush()
+
+    return ApiResponse(data={
+        "imported": imported,
+        "duplicates": duplicates,
+        "invalid": [{"line_no": i.line_no, "raw": i.raw, "reason": i.reason} for i in invalid],
+    })

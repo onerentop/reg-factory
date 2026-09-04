@@ -39,6 +39,12 @@ class ProxyStatusUpdate(BaseModel):
     status: str = Field(min_length=1, max_length=20)
 
 
+class ProxyImportRequest(BaseModel):
+    text: str = Field(min_length=1, max_length=200_000)
+    type: str = Field(default="http", pattern="^(http|https|socks5)$")
+    skip_duplicates: bool = Field(default=True)
+
+
 class RegistrationRequest(BaseModel):
     count: int = Field(default=1, ge=1, le=20)
     # 兼容 API 调用方直接提供的代理；浏览器 UI 应传 proxy_id，避免暴露密码。

@@ -284,3 +284,97 @@ def test_update_proxy_status_not_found(client):
     app.dependency_overrides[get_session] = _session_override(session)
     r = client.put(f"/proxy/{pid}/status", json={"status": "disabled"})
     assert r.status_code == 404
+
+
+# ──────────────────────────────────────────────
+# POST /proxy/import
+# ──────────────────────────────────────────────
+
+def _import_session(existing=None):
+    """导入路由用的 fake session：execute 返回库内已有代理，add 收集新建项。"""
+    added = []
+    rows = existing or []
+
+    class _Session:
+        async def execute(self, stmt):
+            class R:
+                def scalars(self_inner): return self_inner
+                def all(self_inner): return rows
+            return R()
+        def add(self, obj):
+            obj.id = uuid.uuid4()
+            added.append(obj)
+        async def flush(self): pass
+        async def refresh(self, obj): pass
+        async def delete(self, obj): pass
+
+    return _Session(), added
+
+
+def test_import_proxies_creates_entries(client):
+    session, added = _import_session()
+    app.dependency_overrides[get_session] = _session_override(session)
+    r = client.post("/proxy/import", json={
+        "text": "45.61.125.104:6115:proxyuser:proxypass\n136.0.186.187:6548:proxyuser:proxypass",
+        "type": "http",
+    })
+    assert r.status_code == 200
+    data = r.json()["data"]
+    assert data["imported"] == 2 and data["duplicates"] == 0 and data["invalid"] == []
+    assert added[0].type == "http" and added[0].port == 6115
+    assert added[0].username == "proxyuser" and added[0].password == "proxypass"
+
+
+def test_imported_proxies_are_active_and_claimable(client):
+    """导入必须显式设 status='active'。默认值 'unknown' 不可被抢占，
+    漏设会让整池静默失效——这条测试是那道防线。"""
+    session, added = _import_session()
+    app.dependency_overrides[get_session] = _session_override(session)
+    client.post("/proxy/import", json={"text": "1.2.3.4:8080:u:p", "type": "http"})
+    from gateway.proxy_binding_service import ACTIVE_STATUSES
+    assert added[0].status in ACTIVE_STATUSES
+
+
+def test_import_reports_invalid_lines(client):
+    session, _ = _import_session()
+    app.dependency_overrides[get_session] = _session_override(session)
+    r = client.post("/proxy/import", json={"text": "1.2.3.4:8080\ngarbage", "type": "http"})
+    data = r.json()["data"]
+    assert data["imported"] == 1
+    assert data["invalid"][0]["line_no"] == 2
+    assert data["invalid"][0]["raw"] == "garbage"
+    assert data["invalid"][0]["reason"]
+
+
+def test_import_skips_existing_host_port(client):
+    existing = FakeProxyEntry(host="1.2.3.4", port=8080)
+    session, added = _import_session([existing])
+    app.dependency_overrides[get_session] = _session_override(session)
+    r = client.post("/proxy/import", json={"text": "1.2.3.4:8080", "type": "http"})
+    data = r.json()["data"]
+    assert data["imported"] == 0 and data["duplicates"] == 1
+    assert added == []
+
+
+def test_import_deduplicates_within_the_same_paste(client):
+    """同一次粘贴里的重复行也只入库一条。"""
+    session, added = _import_session()
+    app.dependency_overrides[get_session] = _session_override(session)
+    r = client.post("/proxy/import", json={"text": "1.2.3.4:8080\n1.2.3.4:8080", "type": "http"})
+    data = r.json()["data"]
+    assert data["imported"] == 1 and data["duplicates"] == 1
+    assert len(added) == 1
+
+
+def test_import_rejects_empty_text(client):
+    session, _ = _import_session()
+    app.dependency_overrides[get_session] = _session_override(session)
+    r = client.post("/proxy/import", json={"text": "", "type": "http"})
+    assert r.status_code == 422
+
+
+def test_import_rejects_bad_type(client):
+    session, _ = _import_session()
+    app.dependency_overrides[get_session] = _session_override(session)
+    r = client.post("/proxy/import", json={"text": "1.2.3.4:8080", "type": "ftp"})
+    assert r.status_code == 422
