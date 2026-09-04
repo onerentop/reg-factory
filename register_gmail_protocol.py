@@ -804,7 +804,7 @@ def main():
     # 轮换 sid 换新 IP + 强制 socks5h(远端 DNS)，避免旧 sid 失效 / 本地 DNS 握手断
     if proxy and not args.no_rotate:
         try:
-            from outlook_reg_loop import rotate_proxy_sid
+            from common.proxy import rotate_proxy_sid
             proxy = rotate_proxy_sid(proxy)
         except Exception:
             pass

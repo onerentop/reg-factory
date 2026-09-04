@@ -37,11 +37,7 @@ from common.browser_provider import get_browser_provider
 # 复用纯协议里的工具
 import register_gmail_protocol as P
 
-try:
-    from outlook_reg_loop import rotate_proxy_sid
-except Exception:
-    def rotate_proxy_sid(p):
-        return p
+from common.proxy import rotate_proxy_sid
 
 IMSI = "460009188843340"
 CONTINUE_RAW = (
@@ -266,6 +262,9 @@ async def wait_phone_page(page, max_wait=240):
 
 # ======================== HTTP：用浏览器会话跑手机验证 ========================
 
+# 单体默认在 8000 暴露 /sms；允许旧的独立 sms_service 通过环境变量覆盖。
+SMS_SERVICE_URL = os.environ.get("SMS_SERVICE_URL", "http://127.0.0.1:8000").rstrip("/")
+
 # ======================== 浏览器手机验证 + 建号收尾 ========================
 
 def _svc_acquire(provider, country, max_price, fixed, service="go"):
@@ -273,7 +272,7 @@ def _svc_acquire(provider, country, max_price, fixed, service="go"):
     失败 error 带回 services 的真实原因(如 NO_BALANCE 余额不足)。"""
     import requests as _r
     try:
-        resp = _r.post("http://localhost:8001/sms/number/acquire", json={
+        resp = _r.post(f"{SMS_SERVICE_URL}/sms/number/acquire", json={
             "service": service, "country": str(country), "provider": provider,
             "max_price": str(max_price), "fixed_price": bool(fixed),
         }, timeout=30, proxies={"http": None, "https": None})
@@ -299,7 +298,7 @@ def _svc_code(order_id, max_wait=180):
     """走 services sms_service 收码。返回 code 或 None。"""
     import requests as _r
     try:
-        resp = _r.get(f"http://localhost:8001/sms/number/{order_id}/code",
+        resp = _r.get(f"{SMS_SERVICE_URL}/sms/number/{order_id}/code",
                       params={"timeout": max_wait}, timeout=max_wait + 10,
                       proxies={"http": None, "https": None})
         return (resp.json().get("data") or {}).get("code")
@@ -312,7 +311,7 @@ def _svc_cancel(order_id):
     """走 services sms_service 释放号（取消订单）。"""
     import requests as _r
     try:
-        _r.post(f"http://localhost:8001/sms/number/{order_id}/cancel",
+        _r.post(f"{SMS_SERVICE_URL}/sms/number/{order_id}/cancel",
                 timeout=15, proxies={"http": None, "https": None})
     except Exception as e:
         log(f"  [svc-sms] cancel err: {e}", "WARN")
