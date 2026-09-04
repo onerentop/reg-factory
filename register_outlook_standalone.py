@@ -152,6 +152,87 @@ def generate_email_password():
 
 # ======================== CAPTCHA Solvers ========================
 
+def _solve_perimeterx_http(page_url, proxy_str=None, session=None, max_wait=120):
+    """协议模式（纯 HTTP）解 PerimeterX：CapSolver AntiPerimeterXTask（带代理）
+    拿 _px2/_pxhd cookie 写入 session，重试加载即可穿过。返回 dict 或 None。
+    需要 CAPSOLVER_API_KEY。代理格式与注册代理串一致。"""
+    if not CAPSOLVER_API_KEY:
+        print("  [capsolver-px-http] no API key, skipping")
+        return None
+    try:
+        ua = (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/130.0.0.0 Safari/537.36"
+        )
+        proxy_cfg = None
+        if proxy_str:
+            parsed = IXBrowserProvider._parse_proxy(proxy_str)
+            if parsed:
+                auth = ""
+                if parsed.get("username"):
+                    auth = f"{parsed['username']}:{parsed.get('password', '')}@"
+                proxy_cfg = f"{parsed.get('type', 'http')}://{auth}{parsed['host']}:{parsed['port']}"
+
+        # 先带现有 cookie 拿 _pxvid/_pxde（帮助 PX 服务端定位会话）
+        pxvid = pxde = ""
+        if session is not None:
+            for c in session.cookies:
+                if c.name == "_pxvid":
+                    pxvid = c.value
+                elif c.name == "_pxde":
+                    pxde = c.value
+
+        task = {
+            "type": "AntiPerimeterXTask" if proxy_cfg else "AntiPerimeterXTaskProxyless",
+            "websiteURL": page_url,
+            "userAgent": ua,
+        }
+        if proxy_cfg:
+            task["proxy"] = proxy_cfg
+        if pxvid:
+            task["_pxvid"] = pxvid
+        if pxde:
+            task["_pxde"] = pxde
+
+        payload = {"clientKey": CAPSOLVER_API_KEY, "task": task}
+        resp = requests.post("https://api.capsolver.com/createTask", json=payload, timeout=30)
+        data = resp.json()
+        if data.get("errorId", 1) != 0:
+            print(f"  [capsolver-px-http] create error: {data.get('errorDescription', data)}")
+            return None
+        task_id = data["taskId"]
+        print(f"  [capsolver-px-http] task: {task_id}")
+
+        start = time.time()
+        while time.time() - start < max_wait:
+            time.sleep(5)
+            resp = requests.post(
+                "https://api.capsolver.com/getTaskResult",
+                json={"clientKey": CAPSOLVER_API_KEY, "taskId": task_id},
+                timeout=30,
+            )
+            result = resp.json()
+            if result.get("status") == "ready":
+                solution = result.get("solution", {})
+                print(f"  [capsolver-px-http] solved! keys: {list(solution.keys())}")
+                # 写入 session cookie（_px2/_pxhd 是 PX 会话凭据）
+                if session is not None:
+                    for key in ("_px2", "_pxhd", "_px3", "_pxCaptcha"):
+                        val = solution.get(key)
+                        if val:
+                            session.cookies.set(key, str(val), domain=".live.com")
+                return solution
+            elif result.get("status") == "failed":
+                print(f"  [capsolver-px-http] failed: {result.get('errorDescription', '')}")
+                return None
+        print("  [capsolver-px-http] timeout")
+        return None
+    except Exception as e:
+        print(f"  [capsolver-px-http] error: {e}")
+        return None
+
+
 def solve_arkose_capsolver(public_key=MS_SIGNUP_ARKOSE_KEY, page_url="https://signup.live.com/", max_wait=120):
     """Use CapSolver to solve Arkose Labs (FunCaptcha) challenge."""
     if not CAPSOLVER_API_KEY:
@@ -656,12 +737,26 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False, prox
 
     try:
         await _warm_session(page, idx, tag)   # 会话预热(+10-15%)，再去 signup 带上自然来路
-        print(f"  {tag} navigating to signup page...")
-        await asyncio.wait_for(
-            page.goto("https://signup.live.com/signup?lic=1", timeout=50000,
-                      wait_until="domcontentloaded", referer="https://outlook.com/"),
-            timeout=55,
-        )
+        # signup 加载重试：住宅代理到微软连接波动（CONNECT 后可能挂起 50s+），
+        # 单次 goto 失败不应直接放弃整个注册，重试 3 次（每次间隔随机）。
+        _signed_in = False
+        for _g in range(3):
+            print(f"  {tag} navigating to signup page... (try {_g + 1}/3)")
+            try:
+                await asyncio.wait_for(
+                    page.goto("https://signup.live.com/signup?lic=1", timeout=50000,
+                              wait_until="domcontentloaded", referer="https://outlook.com/"),
+                    timeout=55,
+                )
+                _signed_in = True
+                break
+            except Exception as e:
+                print(f"  {tag} signup goto failed (try {_g + 1}/3): {str(e)[:80]}")
+                if _g < 2:
+                    await asyncio.sleep(random.uniform(3, 6))
+        if not _signed_in:
+            print(f"  {tag} signup 加载 3 次失败，放弃")
+            return None, None
         # 等页面真正渲染完成（慢代理/住宅 IP 下 CSS+JS 可能 10-20s 才出内容，
         # 只等 domcontentloaded 会拿到空白 body，后续填表/验证码全部错位）。
         # 轮询 body 出现可识别的注册表单文本（多语言），最多等 30s。
@@ -675,6 +770,10 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False, prox
                 "create your microsoft", "crear tu cuenta", "créez votre compte",
                 "erstellen sie ihr", "crea il tuo account", "crie sua conta",
                 "tạo tài khoản", "创建你的", "创建帐户", "建立您的",
+                # consent/privacy 页（个人数据导出许可等）也视为已渲染，
+                # 否则等满 30s 才到 consent 处理，白白浪费并误判 email not found
+                "同意并继续", "个人数据导出", "agree and continue", "data export",
+                "consentement", "privacy",
             ]):
                 break
         await asyncio.sleep(random.uniform(1.0, 2.0))
@@ -687,7 +786,11 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False, prox
             # Check if on a consent/privacy page (not the actual signup form)
             # Only trigger for actual privacy/consent standalone pages, not signup pages with footer links
             is_signup_form = "signup.live.com" in current_url and "privacynotice" not in current_url
-            if not is_signup_form and (
+            # 明确的 consent 页面标志（"个人数据导出许可" 是独立 consent 页，URL 仍是
+            # signup.live.com）：即使 is_signup_form=True 也应处理，否则跳到邮箱段报
+            # email not found。
+            _consent_marker = any(kw in page_text for kw in ["个人数据导出许可", "数据导出许可", "同意并继续"])
+            if (not is_signup_form or _consent_marker) and (
                 any(kw in page_text for kw in ["同意并继续", "个人数据", "数据导出"]) or \
                 any(kw in page_text.lower() for kw in [
                     "agree and continue", "consent", "data export",
@@ -1200,11 +1303,13 @@ async def register_outlook(page, context, idx=0, captcha_early_abort=False, prox
         no_btn_rounds = 0
 
         # headless: 90 s captcha window; browser: 240 s (multiple press rounds)
-        _captcha_rounds = 30 if captcha_early_abort else 80
+        _captcha_rounds = 30 if captcha_early_abort else 150
         # When max_press is small, shrink the wait loop too — otherwise we'd
         # exhaust presses then idle for the remaining captcha window.
-        # Rough budget: ~10s per press cycle. +20s slack for first solver call.
-        _capped_rounds = max(8, max_press * 4 + 8)
+        # 预算：每次按压循环内 hold 9-12s + sleep 3-6s + iframe 定位/截图 ≈ 20s。
+        # max_press*4+8 只够 ~5-6 次按压就耗尽轮次（browser 模式 max_press=15
+        # 实际只能按 5 次）。改为 max_press*8+16，保证 15 次按压都能执行。
+        _capped_rounds = max(8, max_press * 8 + 16)
         _captcha_rounds = min(_captcha_rounds, _capped_rounds)
 
         # 真人长按模式：脚本只自动填表到挑战出现，长按交给真人；轮询等过、不自动按、不抢鼠标。
@@ -1697,10 +1802,33 @@ def register_outlook_protocol(proxy_str=None, idx=0):
             print(f"  {tag} ServerData not in HTML — protocol N/A")
             return None, None
 
-        # Detect immediate bot-block
+        # Detect immediate bot-block → 尝试 PX 打码拿 _px2/_pxhd cookie 后重试。
+        # 协议模式（纯 HTTP）下 PerimeterX 在加载页注入挑战，CapSolver 的
+        # AntiPerimeterXTask（带代理）能解出 _px2/_pxhd，写入 session cookie
+        # 后再 GET 一次即可穿过。要求 CAPSOLVER_API_KEY。
         if any(kw in html.lower() for kw in ["perimeterx", "px-block", "_px.init", "bot protection"]):
-            print(f"  {tag} PerimeterX blocked on load")
-            return None, None
+            print(f"  {tag} PerimeterX blocked on load — solving via CapSolver...")
+            px_solution = _solve_perimeterx_http(
+                page_url="https://signup.live.com/signup?lic=1",
+                proxy_str=proxy_str,
+                session=session,
+                max_wait=120,
+            )
+            if not px_solution:
+                print(f"  {tag} PX solve failed, giving up")
+                return None, None
+            print(f"  {tag} PX solved, retrying signup load...")
+            resp = session.get(
+                "https://signup.live.com/signup?lic=1",
+                proxies=proxies, timeout=30, allow_redirects=True,
+            )
+            if resp.status_code != 200:
+                print(f"  {tag} HTTP {resp.status_code} after PX solve")
+                return None, None
+            html = resp.text
+            if "ServerData" not in html and "apiCanary" not in html:
+                print(f"  {tag} still blocked after PX solve — ServerData missing")
+                return None, None
 
         # Extract ServerData config (JSON API 模式)
         import codecs
@@ -2064,6 +2192,7 @@ async def _open_ixbrowser_page(bb, idx, proxy_str):
             profile_id = None
             for _retry in range(5):
                 try:
+                    # 创建直连窗口（避免 ixBrowser 代理检测失败），打开时注入代理
                     profile_id = bb.create_browser(name=name, proxy_str=cur_proxy)
                     break
                 except Exception as e:
