@@ -95,3 +95,31 @@ def test_list_browsers_converts_fields():
     rows = out["data"]["list"]
     assert {"id", "name", "remark", "seq"} <= set(rows[0].keys())
     assert rows[0]["id"] == 2 and rows[0]["seq"] == 2
+
+
+def test_parse_proxy_four_field_defaults_to_socks5_for_compat():
+    """不传 default_type 时保持既有行为，1024proxy 调用方不受影响。"""
+    assert IXBrowserProvider._parse_proxy("1.2.3.4:1080:u:p")["type"] == "socks5"
+
+
+def test_parse_proxy_four_field_honours_explicit_type():
+    assert IXBrowserProvider._parse_proxy("1.2.3.4:8080:u:p", default_type="http")["type"] == "http"
+
+
+def test_parse_proxy_scheme_prefix_still_wins_over_default_type():
+    """显式前缀优先于 default_type。"""
+    assert IXBrowserProvider._parse_proxy(
+        "socks5://u:p@1.2.3.4:1080", default_type="http")["type"] == "socks5"
+
+
+def test_parse_proxy_userpass_form_honours_explicit_type():
+    r = IXBrowserProvider._parse_proxy("u:p@1.2.3.4:8080", default_type="http")
+    assert r["type"] == "http" and r["host"] == "1.2.3.4" and r["port"] == "8080"
+
+
+def test_parse_proxy_host_port_form_honours_explicit_type():
+    assert IXBrowserProvider._parse_proxy("1.2.3.4:8080", default_type="http")["type"] == "http"
+
+
+def test_parse_proxy_still_returns_none_for_garbage_with_explicit_type():
+    assert IXBrowserProvider._parse_proxy("garbage", default_type="http") is None

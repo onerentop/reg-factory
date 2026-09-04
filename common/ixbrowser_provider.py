@@ -78,14 +78,20 @@ class IXBrowserProvider(BrowserProvider):
 
     # ---------------- 代理解析（从 register_outlook_standalone 迁移） ----------------
     @staticmethod
-    def _parse_proxy(proxy_str):
+    def _parse_proxy(proxy_str, default_type=None):
         """解析代理串。支持：
           socks5://user:pass@host:port / socks5://host:port
-          user:pass@host:port / host:port （默认 http）
-        返回 dict 或 None。"""
+          user:pass@host:port / host:port （默认 http，四段式默认 socks5）
+        返回 dict 或 None。
+
+        Args:
+            proxy_str: 代理连接字符串
+            default_type: 显式指定类型，对于四段式格式不为 None 时会覆盖默认 socks5 行为
+        """
         if not proxy_str:
             return None
-        proxy_type = "http"
+        proxy_type = default_type or "http"
+        explicit = default_type is not None
         lower = proxy_str.lower()
         if lower.startswith("socks5://"):
             proxy_type = "socks5"
@@ -112,7 +118,7 @@ class IXBrowserProvider(BrowserProvider):
         match3 = re.match(r'^([^:]+):(\d+):(.+):([^:]+)$', proxy_str)
         if match3:
             return {
-                "type": proxy_type if proxy_type != "http" else "socks5",
+                "type": proxy_type if explicit or proxy_type != "http" else "socks5",
                 "host": match3.group(1),
                 "port": match3.group(2),
                 "username": match3.group(3),
