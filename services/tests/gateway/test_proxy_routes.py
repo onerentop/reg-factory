@@ -97,7 +97,11 @@ def test_list_proxies_with_items(client):
     entry = FakeProxyEntry()
     session = make_fake_session(scalars_all=[entry])
     app.dependency_overrides[get_session] = _session_override(session)
-    r = client.get("/proxy")
+    # 通用 FakeSession 对任何语句都返回同一个 FakeResult（scalars_all=[entry]），
+    # today_summary() 需要 (pid, count) 元组，不 mock 会在 group_by 聚合处解包失败。
+    with patch("gateway.proxy_binding_service.ProxyBindingService.today_summary",
+               new=AsyncMock(return_value={})):
+        r = client.get("/proxy")
     assert r.status_code == 200
     items = r.json()["data"]
     assert len(items) == 1
@@ -378,3 +382,133 @@ def test_import_rejects_bad_type(client):
     app.dependency_overrides[get_session] = _session_override(session)
     r = client.post("/proxy/import", json={"text": "1.2.3.4:8080", "type": "ftp"})
     assert r.status_code == 422
+
+
+# ──────────────────────────────────────────────
+# 绑定聚合 / 明细 / 配额
+# ──────────────────────────────────────────────
+
+def test_list_proxies_includes_binding_summary(client):
+    entry = FakeProxyEntry()
+    session = make_fake_session(scalars_all=[entry])
+    app.dependency_overrides[get_session] = _session_override(session)
+
+    summary = {str(entry.id): {"total_bound": 7, "today_bound": 1,
+                               "today_profile_name": "a@gmail.com"}}
+    with patch("gateway.proxy_binding_service.ProxyBindingService.today_summary",
+               new=AsyncMock(return_value=summary)):
+        r = client.get("/proxy")
+
+    item = r.json()["data"][0]
+    assert item["today_bound"] == 1 and item["total_bound"] == 7
+    assert item["today_profile_name"] == "a@gmail.com"
+    assert item["available_today"] is False
+
+
+def test_list_proxies_defaults_when_never_bound(client):
+    """从未绑定过的代理不在 today_summary 里，必须走默认值而不是 KeyError。"""
+    entry = FakeProxyEntry()
+    session = make_fake_session(scalars_all=[entry])
+    app.dependency_overrides[get_session] = _session_override(session)
+
+    with patch("gateway.proxy_binding_service.ProxyBindingService.today_summary",
+               new=AsyncMock(return_value={})):
+        r = client.get("/proxy")
+
+    assert r.status_code == 200
+    item = r.json()["data"][0]
+    assert item["today_bound"] == 0 and item["total_bound"] == 0
+    assert item["today_profile_name"] is None
+    assert item["available_today"] is True
+
+
+def test_list_proxies_still_hides_password(client):
+    """加了绑定字段后，密码仍然不能出现在响应里。"""
+    entry = FakeProxyEntry(password="secret")
+    session = make_fake_session(scalars_all=[entry])
+    app.dependency_overrides[get_session] = _session_override(session)
+
+    with patch("gateway.proxy_binding_service.ProxyBindingService.today_summary",
+               new=AsyncMock(return_value={})):
+        r = client.get("/proxy")
+
+    item = r.json()["data"][0]
+    assert "password" not in item
+    assert item["has_password"] is True
+    assert "secret" not in r.text
+
+
+def test_get_proxy_bindings_returns_rows(client):
+    import datetime
+    pid = str(uuid.uuid4())
+    session = make_fake_session()
+    app.dependency_overrides[get_session] = _session_override(session)
+
+    class FakeBinding:
+        bound_date = datetime.date(2026, 9, 4)
+        profile_id = "777"
+        profile_name = "a@gmail.com"
+        platform = "google"
+        status = "success"
+        created_at = datetime.datetime(2026, 9, 4, 10, 0, 0)
+
+    with patch("gateway.proxy_binding_service.ProxyBindingService.list_bindings",
+               new=AsyncMock(return_value=[FakeBinding()])):
+        r = client.get(f"/proxy/{pid}/bindings")
+
+    assert r.status_code == 200
+    row = r.json()["data"][0]
+    assert row["profile_name"] == "a@gmail.com"
+    assert row["profile_id"] == "777"
+    assert row["bound_date"] == "2026-09-04"
+    assert row["status"] == "success"
+
+
+def test_get_proxy_bindings_empty_for_unknown_proxy(client):
+    pid = str(uuid.uuid4())
+    session = make_fake_session()
+    app.dependency_overrides[get_session] = _session_override(session)
+
+    with patch("gateway.proxy_binding_service.ProxyBindingService.list_bindings",
+               new=AsyncMock(return_value=[])):
+        r = client.get(f"/proxy/{pid}/bindings")
+
+    assert r.status_code == 200
+    assert r.json()["data"] == []
+
+
+def test_get_proxy_bindings_handles_null_fields(client):
+    """claimed 状态的绑定还没有 profile_id/profile_name，不能因此报错。"""
+    import datetime
+    pid = str(uuid.uuid4())
+    session = make_fake_session()
+    app.dependency_overrides[get_session] = _session_override(session)
+
+    class FakeBinding:
+        bound_date = datetime.date(2026, 9, 4)
+        profile_id = None
+        profile_name = None
+        platform = "google"
+        status = "claimed"
+        created_at = None
+
+    with patch("gateway.proxy_binding_service.ProxyBindingService.list_bindings",
+               new=AsyncMock(return_value=[FakeBinding()])):
+        r = client.get(f"/proxy/{pid}/bindings")
+
+    assert r.status_code == 200
+    row = r.json()["data"][0]
+    assert row["profile_id"] is None and row["created_at"] is None
+
+
+def test_proxy_quota_endpoint(client):
+    session = make_fake_session()
+    app.dependency_overrides[get_session] = _session_override(session)
+
+    with patch("gateway.proxy_binding_service.ProxyBindingService.quota",
+               new=AsyncMock(return_value={"total": 100, "used_today": 37, "available_today": 63})):
+        r = client.get("/proxy/quota")
+
+    assert r.status_code == 200
+    assert r.json()["data"]["available_today"] == 63
+    assert r.json()["data"]["total"] == 100

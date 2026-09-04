@@ -12,12 +12,19 @@ router = APIRouter()
 @router.get("/proxy", response_model=ApiResponse)
 async def list_proxies(session: AsyncSession = Depends(get_session)):
     from sqlalchemy import select
+    from gateway.proxy_binding_service import ProxyBindingService
+
     result = await session.execute(select(ProxyEntry).order_by(ProxyEntry.created_at.desc()))
     proxies = result.scalars().all()
+    summary = await ProxyBindingService(session).today_summary()
+    empty = {"total_bound": 0, "today_bound": 0, "today_profile_name": None}
     return ApiResponse(data=[{
         "id": str(p.id), "type": p.type, "host": p.host, "port": p.port,
         "username": p.username, "has_password": bool(p.password), "status": p.status,
         "region": p.region,
+        # 从未绑定过的代理不在 summary 里，必须用 .get 兜底
+        **summary.get(str(p.id), empty),
+        "available_today": summary.get(str(p.id), empty)["today_bound"] == 0,
     } for p in proxies])
 
 
@@ -134,3 +141,31 @@ async def import_proxies(body: ProxyImportRequest, session: AsyncSession = Depen
         "duplicates": duplicates,
         "invalid": [{"line_no": i.line_no, "raw": i.raw, "reason": i.reason} for i in invalid],
     })
+
+
+@router.get("/proxy/quota", response_model=ApiResponse)
+async def get_proxy_quota(session: AsyncSession = Depends(get_session)):
+    """今日代理配额概览，供注册页展示剩余可用量。"""
+    from gateway.proxy_binding_service import ProxyBindingService
+    return ApiResponse(data=await ProxyBindingService(session).quota())
+
+
+@router.get("/proxy/{proxy_id}/bindings", response_model=ApiResponse)
+async def list_proxy_bindings(
+    proxy_id: str,
+    limit: int = 50,
+    offset: int = 0,
+    session: AsyncSession = Depends(get_session),
+):
+    """该代理绑定过的窗口明细，最近的在前。"""
+    from gateway.proxy_binding_service import ProxyBindingService
+
+    bindings = await ProxyBindingService(session).list_bindings(proxy_id, limit=limit, offset=offset)
+    return ApiResponse(data=[{
+        "bound_date": b.bound_date.isoformat() if b.bound_date else None,
+        "profile_id": b.profile_id,
+        "profile_name": b.profile_name,
+        "platform": b.platform,
+        "status": b.status,
+        "created_at": b.created_at.isoformat() if b.created_at else None,
+    } for b in bindings])
