@@ -8,11 +8,15 @@ interface Proxy {
   host: string
   port: number
   username?: string
-  password?: string
+  has_password?: boolean
   status: string
   active: boolean
   region?: string
   ip?: string
+  today_bound?: number
+  total_bound?: number
+  today_profile_name?: string | null
+  available_today?: boolean
 }
 
 export default function ProxyPage() {
@@ -22,11 +26,23 @@ export default function ProxyPage() {
   const [editingProxy, setEditingProxy] = useState<Proxy | null>(null)
   const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([])
   const [searchText, setSearchText] = useState('')
+  const [importVisible, setImportVisible] = useState(false)
+  const [importText, setImportText] = useState('')
+  const [importType, setImportType] = useState('http')
+  const [bindings, setBindings] = useState<Record<string, any[]>>({})
   const [form] = Form.useForm()
   const [editForm] = Form.useForm()
 
+  const parseResponse = async (response: Response) => {
+    const data = await response.json()
+    if (!response.ok || data.success === false) {
+      throw new Error(data.detail || data.message || '请求失败')
+    }
+    return data
+  }
+
   const fetchProxies = () => {
-    fetch('/api/proxy').then(r => r.json())
+    fetch('/api/proxy').then(parseResponse)
       .then(res => setProxies((res.data || []).map((p: any) => ({
         ...p,
         id: p.id || Date.now().toString(),
@@ -57,19 +73,46 @@ export default function ProxyPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...values, status: 'active' }),
       })
-      const data = await resp.json()
-      if (data.success) {
-        fetchProxies()
-        setAddVisible(false)
-        form.resetFields()
-        message.success('代理已添加')
-      }
+      await parseResponse(resp)
+      fetchProxies()
+      setAddVisible(false)
+      form.resetFields()
+      message.success('代理已添加')
     } catch { message.error('添加失败') }
+  }
+
+  const importProxies = async () => {
+    if (!importText.trim()) {
+      message.warning('请粘贴代理列表')
+      return
+    }
+    try {
+      const resp = await fetch('/api/proxy/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: importText, type: importType, skip_duplicates: true }),
+      })
+      const data = await parseResponse(resp)
+      const { imported, duplicates, invalid } = data.data
+      message.success(`导入 ${imported} 条，跳过重复 ${duplicates} 条，非法 ${invalid.length} 行`)
+      setImportVisible(false)
+      setImportText('')
+      fetchProxies()
+    } catch { message.error('导入失败') }
+  }
+
+  const loadBindings = async (id: string) => {
+    try {
+      const resp = await fetch(`/api/proxy/${id}/bindings`)
+      const data = await parseResponse(resp)
+      setBindings(prev => ({ ...prev, [id]: data.data || [] }))
+    } catch { setBindings(prev => ({ ...prev, [id]: [] })) }
   }
 
   const removeProxy = async (id: string) => {
     try {
-      await fetch(`/api/proxy/${id}`, { method: 'DELETE' })
+      const response = await fetch(`/api/proxy/${id}`, { method: 'DELETE' })
+      await parseResponse(response)
       setProxies(proxies.filter(p => p.id !== id))
       setSelectedRowKeys(selectedRowKeys.filter(k => k !== id))
       message.success('已删除')
@@ -80,9 +123,10 @@ export default function ProxyPage() {
     Modal.confirm({
       title: `确认删除 ${selectedRowKeys.length} 个代理？`,
       onOk: async () => {
-        for (const id of selectedRowKeys) {
-          await fetch(`/api/proxy/${id}`, { method: 'DELETE' }).catch(() => {})
-        }
+        await Promise.all(selectedRowKeys.map(async (id) => {
+          const response = await fetch(`/api/proxy/${id}`, { method: 'DELETE' })
+          await parseResponse(response)
+        }))
         setSelectedRowKeys([])
         fetchProxies()
         message.success('批量删除完成')
@@ -97,7 +141,7 @@ export default function ProxyPage() {
       host: record.host,
       port: record.port,
       username: record.username || '',
-      password: record.password || '',
+      password: '',
     })
     setEditVisible(true)
   }
@@ -105,12 +149,15 @@ export default function ProxyPage() {
   const saveEdit = async () => {
     if (!editingProxy) return
     const values = await editForm.validateFields()
+    const payload = { ...values }
+    if (!payload.password) delete payload.password
     try {
-      await fetch(`/api/proxy/${editingProxy.id}`, {
+      const response = await fetch(`/api/proxy/${editingProxy.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(values),
+        body: JSON.stringify(payload),
       })
+      await parseResponse(response)
       setEditVisible(false)
       fetchProxies()
       message.success('已更新')
@@ -119,11 +166,12 @@ export default function ProxyPage() {
 
   const toggleActive = async (id: string, active: boolean) => {
     try {
-      await fetch(`/api/proxy/${id}/status`, {
+      const response = await fetch(`/api/proxy/${id}/status`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: active ? 'active' : 'inactive' }),
       })
+      await parseResponse(response)
       setProxies(proxies.map(p => p.id === id ? { ...p, active, status: active ? 'active' : 'inactive' } : p))
     } catch { message.error('更新失败') }
   }
@@ -132,7 +180,7 @@ export default function ProxyPage() {
     setProxies(prev => prev.map(p => p.id === id ? { ...p, status: 'testing' } : p))
     try {
       const resp = await fetch(`/api/proxy/${id}/test`, { method: 'POST' })
-      const data = await resp.json()
+      const data = await parseResponse(resp)
       const testResult = data.data?.result || 'unavailable'
       const ip = data.data?.ip || ''
       const region = data.data?.region || ''
@@ -191,6 +239,19 @@ export default function ProxyPage() {
         return <span style={{ color: 'var(--text-secondary)' }}>未检测</span>
       },
     },
+    {
+      title: '今日 / 累计', key: 'binding', width: 150,
+      render: (_: any, record: Proxy) => (
+        <Space size={4}>
+          <Tag color={record.today_bound ? 'red' : 'green'}>
+            今日 {record.today_bound ?? 0}/1
+          </Tag>
+          <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>
+            累计 {record.total_bound ?? 0}
+          </span>
+        </Space>
+      ),
+    },
     { title: '状态', dataIndex: 'status', key: 'status', width: 90, render: statusTag },
     {
       title: '激活', key: 'active', width: 60,
@@ -239,6 +300,7 @@ export default function ProxyPage() {
         <Space>
           <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>
             已激活 {proxies.filter(p => p.active !== false).length} / {proxies.length}
+            ｜今日可用 {proxies.filter(p => p.available_today !== false).length} / {proxies.length}
           </span>
           <Input
             prefix={<SearchOutlined />}
@@ -253,6 +315,7 @@ export default function ProxyPage() {
             </Button>
           )}
           <Button onClick={testAll} disabled={proxies.length === 0}>一键测试</Button>
+          <Button onClick={() => setImportVisible(true)}>批量导入</Button>
           <Button type="primary" icon={<PlusOutlined />} onClick={() => setAddVisible(true)}>添加代理</Button>
         </Space>
       </div>
@@ -265,6 +328,27 @@ export default function ProxyPage() {
         rowSelection={{
           selectedRowKeys,
           onChange: (keys) => setSelectedRowKeys(keys as string[]),
+        }}
+        expandable={{
+          onExpand: (expanded, record) => { if (expanded) loadBindings(record.id) },
+          expandedRowRender: (record: Proxy) => (
+            <Table
+              rowKey={(r: any) => `${r.bound_date}-${r.profile_id}`}
+              size="small"
+              pagination={false}
+              locale={{ emptyText: '暂无绑定记录' }}
+              dataSource={bindings[record.id] || []}
+              columns={[
+                { title: '日期', dataIndex: 'bound_date', key: 'bound_date' },
+                { title: '窗口 ID', dataIndex: 'profile_id', key: 'profile_id',
+                  render: (v: string) => v || '-' },
+                { title: '窗口名 / 邮箱', dataIndex: 'profile_name', key: 'profile_name',
+                  render: (v: string) => v || '-' },
+                { title: '平台', dataIndex: 'platform', key: 'platform' },
+                { title: '结果', dataIndex: 'status', key: 'status' },
+              ]}
+            />
+          ),
         }}
         size="middle"
       />
@@ -279,6 +363,22 @@ export default function ProxyPage() {
         <Form form={editForm} layout="vertical">
           {proxyFormFields}
         </Form>
+      </Modal>
+
+      <Modal title="批量导入代理" open={importVisible} onOk={importProxies}
+             onCancel={() => setImportVisible(false)} width={640}>
+        <Select
+          value={importType}
+          onChange={setImportType}
+          style={{ width: 160, marginBottom: 12 }}
+          options={[{ value: 'http', label: 'HTTP' }, { value: 'socks5', label: 'SOCKS5' }]}
+        />
+        <Input.TextArea
+          rows={12}
+          value={importText}
+          onChange={e => setImportText(e.target.value)}
+          placeholder={'每行一条，支持：\nhost:port:user:pass\nuser:pass@host:port\nhost:port'}
+        />
       </Modal>
     </div>
   )
