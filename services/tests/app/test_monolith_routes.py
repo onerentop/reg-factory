@@ -2,14 +2,19 @@ from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 from app.main import app
+from tests.route_introspection import flatten_api_routes
 
 
 def test_monolith_exposes_domain_routes_without_forwarding_proxy():
-    routes = [route for route in app.routes if isinstance(route, APIRoute)]
-    paths = {route.path for route in routes}
+    routes = flatten_api_routes(app)
+    paths = {path for path, _ in routes}
 
-    assert {"/accounts", "/sms/providers", "/config/", "/dashboard"} <= paths
-    assert not any(route.endpoint.__module__ == "gateway.routers.forwarding" for route in routes)
+    # dashboard_aggregator 已随后端精简被删除，/dashboard 不再存在于路由表。
+    assert {"/accounts", "/sms/providers", "/config/"} <= paths
+    assert "/dashboard" not in paths
+    assert not any(
+        route.endpoint.__module__ == "gateway.routers.forwarding" for _, route in routes
+    )
 
 
 def test_monolith_has_a_single_health_endpoint():
@@ -41,11 +46,11 @@ def test_monolith_keeps_missing_static_assets_as_404():
 
 
 def test_monolith_account_resource_routes_are_uuid_constrained():
-    routes = [route for route in app.routes if isinstance(route, APIRoute)]
+    routes = flatten_api_routes(app)
     account_resource_paths = {
-        route.path
-        for route in routes
-        if "{account_id" in route.path
+        path
+        for path, _ in routes
+        if "{account_id" in path
     }
 
     assert account_resource_paths == {
@@ -59,10 +64,12 @@ def test_monolith_account_resource_routes_are_uuid_constrained():
 
 
 def test_monolith_exposes_api_aliases_without_websocket_aliases():
-    routes = [route for route in app.routes if isinstance(route, APIRoute)]
-    paths = {route.path for route in routes}
+    routes = flatten_api_routes(app)
+    paths = {path for path, _ in routes}
 
-    assert {"/api/accounts", "/api/sms/providers", "/api/config/", "/api/dashboard"} <= paths
+    # dashboard_aggregator 已随后端精简被删除，/api/dashboard 不再存在。
+    assert {"/api/accounts", "/api/sms/providers", "/api/config/"} <= paths
+    assert "/api/dashboard" not in paths
     assert "/api/ws" not in paths
     assert "/api/ws/task/{task_id}/logs" not in paths
 
