@@ -45,6 +45,20 @@ const statusConfig: Record<string, { color: string; icon: React.ReactNode; label
   pending: { color: 'default', icon: <ClockCircleFilled style={{ color: '#9f9bab' }} />, label: '等待中' },
 }
 
+const taskStateFromStatus = (status?: string) => {
+  if (status === 'succeeded') return 'success'
+  if (['failed', 'interrupted', 'cancelled'].includes(status || '')) return 'failed'
+  return 'running'
+}
+
+const taskResultFromSnapshot = (snapshot: any) => {
+  if (snapshot?.status === 'succeeded') return snapshot.result || { success: true }
+  if (['failed', 'interrupted', 'cancelled'].includes(snapshot?.status)) {
+    return snapshot.result || { success: false, error: snapshot.error || '任务失败' }
+  }
+  return undefined
+}
+
 export default function AccountsPage() {
   const { platform } = useParams<{ platform: string }>()
   const [accounts, setAccounts] = useState<Account[]>([])
@@ -57,7 +71,7 @@ export default function AccountsPage() {
   const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([])
   const [registerVisible, setRegisterVisible] = useState(false)
   const [registerCount, setRegisterCount] = useState(1)
-  const [selectedProxy, setSelectedProxy] = useState<string>('')
+  const [selectedProxyId, setSelectedProxyId] = useState<string>('')
   const [registerMode, setRegisterMode] = useState<string>('browser')
   const [proxyList, setProxyList] = useState<any[]>([])
   const [registering, setRegistering] = useState(false)
@@ -134,9 +148,22 @@ export default function AccountsPage() {
       const resp = await fetch(`/api/register/${platform}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ count: registerCount, proxy: selectedProxy, mode: registerMode }),
+        body: JSON.stringify({
+          count: selectedProxyId ? 1 : registerCount,
+          proxy_id: selectedProxyId || undefined,
+          mode: registerMode,
+        }),
       })
       const data = await resp.json()
+      if (!resp.ok) {
+        message.error(data?.detail || '注册请求被拒绝')
+        setRegistering(false)
+        setTaskStatus('')
+        return
+      }
+      if (data.data?.message) {
+        message.warning(data.data.message)
+      }
       const taskIds: string[] = data.data?.task_ids || []
       if (taskIds.length > 0) {
         setTaskOrder(taskIds)
@@ -172,34 +199,90 @@ export default function AccountsPage() {
         }
 
         taskIds.forEach((tid) => {
-          const ws = new WebSocket(`ws://${window.location.hostname}:8000/ws/task/${tid}/logs`)
-          ws.onmessage = (e) => {
-            try {
-              const d = JSON.parse(e.data)
-              if (d.type === 'log' && d.message) {
-                setTaskLogs(prev => ({ ...prev, [tid]: [...(prev[tid] || []), d.message].slice(-300) }))
-              }
-              if (d.type === 'result') {
-                completed.add(tid)
-                allResults[tid] = d.data || {}
-                const r = d.data || {}
-                const statusStr = r.success ? 'success' : 'failed'
-                setTaskStates(prev => ({ ...prev, [tid]: statusStr }))
-                setTaskLogs(prev => ({
-                  ...prev,
-                  [tid]: [...(prev[tid] || []), r.success ? `🎉 成功: ${r.email || ''}` : `💥 失败: ${r.error || ''}`],
-                }))
-                setTaskStatus(`完成 ${completed.size}/${taskIds.length}`)
-              }
-              if (d.type === 'done') {
-                ws.close()
-                checkAllDone()
-              }
-            } catch {
-              setTaskLogs(prev => ({ ...prev, [tid]: [...(prev[tid] || []), e.data] }))
-            }
+          const scheme = window.location.protocol === 'https:' ? 'wss' : 'ws'
+          const token = localStorage.getItem('token')
+          let lastSeq = 0
+          let finished = false
+          let reconnectTimer: number | undefined
+
+          const complete = (result: any = {}) => {
+            if (completed.has(tid)) return
+            completed.add(tid)
+            allResults[tid] = result
+            const statusStr = result.success ? 'success' : 'failed'
+            setTaskStates(prev => ({ ...prev, [tid]: statusStr }))
+            setTaskStatus(`完成 ${completed.size}/${taskIds.length}`)
+            checkAllDone()
           }
-          ws.onerror = () => { completed.add(tid); setTaskStates(prev => ({ ...prev, [tid]: 'failed' })); checkAllDone() }
+
+          const connectTaskLogs = () => {
+            const taskLogsUrl = `${scheme}://${window.location.host}/ws/task/${tid}/logs?after=${lastSeq}`
+            const ws = token ? new WebSocket(taskLogsUrl, token) : new WebSocket(taskLogsUrl)
+            ws.onmessage = (e) => {
+              try {
+                const d = JSON.parse(e.data)
+                if (d.type === 'snapshot') {
+                  const snapshot = d.data || {}
+                  setTaskStates(prev => ({ ...prev, [tid]: taskStateFromStatus(snapshot.status) }))
+                  const result = taskResultFromSnapshot(snapshot)
+                  if (result) {
+                    allResults[tid] = result
+                    finished = true
+                    complete(result)
+                    ws.close()
+                  }
+                  return
+                }
+                if (d.type === 'error') {
+                  const error = d.message || '任务日志连接失败'
+                  setTaskLogs(prev => ({ ...prev, [tid]: [...(prev[tid] || []), `💥 失败: ${error}`].slice(-300) }))
+                  finished = true
+                  complete({ success: false, error })
+                  ws.close()
+                  return
+                }
+                if (d.type === 'event') {
+                  if (typeof d.seq !== 'number' || d.seq <= lastSeq) return
+                  lastSeq = d.seq
+                  const event = d.data || {}
+                  if (event.event_type === 'log' && event.message) {
+                    setTaskLogs(prev => ({ ...prev, [tid]: [...(prev[tid] || []), event.message].slice(-300) }))
+                  }
+                  if (event.event_type === 'result') {
+                    const result = event.data || {}
+                    allResults[tid] = result
+                    setTaskStates(prev => ({ ...prev, [tid]: result.success ? 'success' : 'failed' }))
+                    setTaskLogs(prev => ({
+                      ...prev,
+                      [tid]: [...(prev[tid] || []), result.success ? `🎉 成功: ${result.email || ''}` : `💥 失败: ${result.error || ''}`].slice(-300),
+                    }))
+                  }
+                  if (event.event_type === 'failed' && event.message) {
+                    allResults[tid] = { success: false, error: event.message }
+                    setTaskStates(prev => ({ ...prev, [tid]: 'failed' }))
+                    setTaskLogs(prev => ({ ...prev, [tid]: [...(prev[tid] || []), `💥 失败: ${event.message}`].slice(-300) }))
+                  }
+                  return
+                }
+                if (d.type === 'done') {
+                  finished = true
+                  complete(allResults[tid] || { success: false, error: '任务未返回结果' })
+                  ws.close()
+                }
+              } catch {
+                setTaskLogs(prev => ({ ...prev, [tid]: [...(prev[tid] || []), e.data] }))
+              }
+            }
+            ws.onclose = () => {
+              if (!finished && !completed.has(tid)) {
+                reconnectTimer = window.setTimeout(connectTaskLogs, 1000)
+              }
+            }
+            ws.onerror = () => ws.close()
+          }
+
+          connectTaskLogs()
+          void reconnectTimer
         })
       } else {
         setRegistering(false)
@@ -303,15 +386,6 @@ export default function AccountsPage() {
               提取Token
             </Button>
           )}
-          {record.status === 'failed' && (
-            <Button size="small" type="link" icon={<ReloadOutlined />} onClick={() => {
-              fetch('/api/accounts/batch/retry', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ account_ids: [record.id] }),
-              }).then(() => message.success('已加入重试队列'))
-            }}>重试</Button>
-          )}
           <Button size="small" type="link" danger icon={<DeleteOutlined />} onClick={() => {
             Modal.confirm({
               title: '确认删除？',
@@ -324,7 +398,12 @@ export default function AccountsPage() {
     },
   ]
 
+  const supportedPlatform = platform === 'outlook' || platform === 'google'
   const platformTitle = platform === 'outlook' ? 'Outlook' : 'Google'
+
+  if (!supportedPlatform) {
+    return <div>不支持的平台</div>
+  }
 
   return (
     <div>
@@ -429,19 +508,34 @@ export default function AccountsPage() {
           <div style={{ padding: '8px 0' }}>
             <div style={{ marginBottom: 20 }}>
               <label style={{ display: 'block', marginBottom: 6, fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>注册数量</label>
-              <InputNumber min={1} max={20} value={registerCount} onChange={(v) => setRegisterCount(v || 1)} style={{ width: '100%' }} />
+              <InputNumber
+                min={1}
+                max={20}
+                value={selectedProxyId ? 1 : registerCount}
+                disabled={!!selectedProxyId}
+                onChange={(v) => setRegisterCount(v || 1)}
+                style={{ width: '100%' }}
+              />
+              {selectedProxyId && (
+                <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 6 }}>
+                  指定代理时每次只能注册 1 个（当天一个 IP 只绑一个窗口）
+                </div>
+              )}
             </div>
             <div style={{ marginBottom: 20 }}>
               <label style={{ display: 'block', marginBottom: 6, fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>使用代理</label>
               <Select
                 style={{ width: '100%' }}
-                value={selectedProxy}
-                onChange={setSelectedProxy}
+                value={selectedProxyId}
+                onChange={(v) => { setSelectedProxyId(v); if (v) setRegisterCount(1) }}
                 options={[
-                  { value: '', label: '🎲 自动选择（从已激活代理中随机）' },
+                  { value: '', label: '🎲 自动选择（从今日未用的已激活代理中分配）' },
                   ...proxyList.map(p => ({
-                    value: `${p.type}://${p.username}:${p.password}@${p.host}:${p.port}`,
-                    label: `${p.host}:${p.port} — ${p.username?.match(/region-(\w+)/)?.[1] || p.type}`,
+                    value: p.id,
+                    label: p.available_today === false
+                      ? `${p.host}:${p.port} — ${p.username?.match(/region-(\w+)/)?.[1] || p.type}（今日已用）`
+                      : `${p.host}:${p.port} — ${p.username?.match(/region-(\w+)/)?.[1] || p.type}`,
+                    disabled: p.available_today === false,
                   })),
                 ]}
               />
@@ -457,10 +551,14 @@ export default function AccountsPage() {
                 style={{ width: '100%' }}
                 value={registerMode}
                 onChange={setRegisterMode}
-                options={[
-                  { value: 'browser', label: '浏览器模式（稳定）' },
-                  { value: 'protocol', label: '纯协议（实验）' },
-                ]}
+                options={platform === 'outlook'
+                  ? [
+                      { value: 'browser', label: '浏览器模式（稳定）' },
+                      { value: 'hybrid', label: '混合模式（浏览器解码+协议提交）' },
+                      { value: 'protocol', label: '纯协议（实验）' },
+                    ]
+                  : [{ value: 'browser', label: '浏览器模式（Google）' }]
+                }
               />
             </div>
             <Button type="primary" block size="large" onClick={handleStartRegister} style={{ height: 44, fontSize: 15 }}>
