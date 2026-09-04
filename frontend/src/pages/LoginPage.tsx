@@ -20,7 +20,7 @@ export default function LoginPage() {
         localStorage.setItem('token', data.data.access_token)
         localStorage.setItem('username', data.data.username)
         localStorage.setItem('role', data.data.role)
-        window.location.href = '/dashboard'
+        window.location.href = '/accounts/outlook'
       } else {
         message.error(data.message || '登录失败')
       }

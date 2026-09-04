@@ -1,10 +1,10 @@
-import { Page, expect } from '@playwright/test'
+import { expect, Page } from '@playwright/test'
 
-/** 用种子 admin 登录，跳到 dashboard。所有 walkthrough 复用。 */
+/** 用种子 admin 登录并进入 Outlook 注册结果页。 */
 export async function login(page: Page) {
   await page.goto('/login')
   await page.getByPlaceholder('用户名').fill('admin')
   await page.getByPlaceholder('密码').fill('admin123')
   await page.locator('button[type="submit"]').click()
-  await expect(page).toHaveURL(/\/dashboard/, { timeout: 15000 })
+  await expect(page).toHaveURL(/\/accounts\/outlook/, { timeout: 15000 })
 }

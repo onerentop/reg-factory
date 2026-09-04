@@ -5,7 +5,7 @@ import { login } from '../_helpers'
  * Registration Walkthrough: /accounts/outlook 新建注册 — GATED
  *
  * 重要说明：
- *   - POST /api/register/outlook 会真正启动 ixBrowser + Celery worker 任务
+ *   - POST /api/register/outlook 会真正启动 ixBrowser + 本机任务管理器 worker 任务
  *   - 任务注定失败（clean IP 已烧毁，PerimeterX 长按验证约 20% 通过率）
  *   - E2E 只触发一次，不等待完成，用 page.waitForRequest 捕获请求确认触发成功
  *   - GATED ≠ FAIL：任务派发成功 = 测试通过，最终注册结果不在 E2E 断言范围内
@@ -64,7 +64,7 @@ test.describe('新建注册 registration walkthrough [GATED]', () => {
     console.log(`[GATED] 注册请求已发出: ${requestFired}`)
     console.log('[GATED] 请求 body:', JSON.stringify(capturedRequestBody))
 
-    // 等待后端响应（POST /api/register/outlook 调 Celery，通常 < 2s）
+    // 等待后端响应（POST /api/register/outlook 调 本机任务管理器，通常 < 2s）
     const response = await responsePromise.catch(() => null)
     let capturedResponseBody: any = null
     if (response) {
@@ -75,7 +75,7 @@ test.describe('新建注册 registration walkthrough [GATED]', () => {
     // 断言：请求确实发出了
     expect(requestFired).toBe(true)
 
-    // 断言：后端返回了 task_ids（说明任务成功入队 Celery）
+    // 断言：后端返回了 task_ids（说明任务成功入队 本机任务管理器）
     if (capturedResponseBody) {
       const taskIds: string[] = capturedResponseBody.data?.task_ids || []
       console.log(`[GATED] 返回 task_ids: ${JSON.stringify(taskIds)}`)
@@ -83,7 +83,7 @@ test.describe('新建注册 registration walkthrough [GATED]', () => {
       if (taskIds.length > 0) {
         // 正常情况：任务成功入队
         expect(taskIds.length).toBeGreaterThan(0)
-        console.log(`[GATED] Celery 任务已入队，task_id: ${taskIds[0]}`)
+        console.log(`[GATED] 本机任务管理器 任务已入队，task_id: ${taskIds[0]}`)
         console.log('[GATED 说明] Worker 会尝试 ixBrowser 注册，因 clean IP 可能已烧毁，')
         console.log('             PerimeterX 长按验证约 20% 通过率 — 注册结果不在 E2E 断言范围')
       } else if (capturedResponseBody.success === false) {
@@ -96,7 +96,7 @@ test.describe('新建注册 registration walkthrough [GATED]', () => {
       }
     } else {
       // 请求发出但响应超时（后端耗时 > 30s）
-      console.warn('[GATED] 响应超时或为空（后端响应时间 > 30s 或 Celery 未响应）')
+      console.warn('[GATED] 响应超时或为空（后端响应时间 > 30s 或 本机任务管理器 未响应）')
     }
 
     // 等待 UI 更新（不等 worker 完成）

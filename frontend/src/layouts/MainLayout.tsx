@@ -1,32 +1,13 @@
-import { Outlet, useNavigate, useLocation } from 'react-router-dom'
-import {
-  DashboardOutlined,
-  MailOutlined,
-  GoogleOutlined,
-  MessageOutlined,
-  GlobalOutlined,
-  SettingOutlined,
-  FileTextOutlined,
-  BellOutlined,
-  AuditOutlined,
-  ClockCircleOutlined,
-  ToolOutlined,
-} from '@ant-design/icons'
+import { Outlet, useLocation, useNavigate } from 'react-router-dom'
+import { GlobalOutlined, GoogleOutlined, MailOutlined, MessageOutlined } from '@ant-design/icons'
 import { Tooltip } from 'antd'
 import styles from './MainLayout.module.css'
 
 const navItems = [
-  { key: '/dashboard', icon: <DashboardOutlined />, label: '仪表盘' },
-  { key: '/sms', icon: <MessageOutlined />, label: '接码平台' },
   { key: '/accounts/outlook', icon: <MailOutlined />, label: 'Outlook' },
   { key: '/accounts/google', icon: <GoogleOutlined />, label: 'Google' },
+  { key: '/sms', icon: <MessageOutlined />, label: '接码平台' },
   { key: '/proxy', icon: <GlobalOutlined />, label: '代理' },
-  { key: '/logs', icon: <FileTextOutlined />, label: '日志' },
-  { key: '/alerts', icon: <BellOutlined />, label: '告警' },
-  { key: '/audit', icon: <AuditOutlined />, label: '审计' },
-  { key: '/schedules', icon: <ClockCircleOutlined />, label: '定时任务' },
-  { key: '/tools', icon: <ToolOutlined />, label: '工具/运维' },
-  { key: '/settings', icon: <SettingOutlined />, label: '设置' },
 ]
 
 export default function MainLayout() {

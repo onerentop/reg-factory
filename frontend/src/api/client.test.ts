@@ -4,7 +4,7 @@
  * vi.hoisted() runs before both vi.mock() factories and module imports,
  * so variables created there are safely accessible from inside the mock factory.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 // ── Create captured object in the hoisted zone ───────────────────────
 const captured = vi.hoisted(() => ({
@@ -45,7 +45,7 @@ vi.mock('axios', () => {
 //   axios.create(...)  → returns the mock instance above
 //   .interceptors.request.use(fn)  → captured.requestHandler = fn
 //   .interceptors.response.use(ok, err) → captured.responseSuccess/Error = ...
-import '@/api/client'
+import { installAuthorizedFetch } from '@/api/client'
 
 // ── Stub window.location so assignment doesn't throw in jsdom ───────
 Object.defineProperty(window, 'location', {
@@ -143,5 +143,57 @@ describe('response interceptor – error path', () => {
   it('when error has no response: rejects with error.message', async () => {
     const error = { message: 'Network Error' }
     await expect(captured.responseError!(error)).rejects.toBe('Network Error')
+  })
+})
+
+describe('authorized fetch compatibility adapter', () => {
+  const originalFetch = window.fetch
+
+  afterEach(() => {
+    window.fetch = originalFetch
+    localStorage.clear()
+  })
+
+  it('adds the bearer token to legacy /api fetch calls', async () => {
+    const nativeFetch = vi.fn().mockResolvedValue(new Response())
+    window.fetch = nativeFetch
+    localStorage.setItem('token', 'legacy-token')
+
+    installAuthorizedFetch()
+    await window.fetch('/api/proxy', { method: 'GET' })
+
+    expect(nativeFetch).toHaveBeenCalledOnce()
+    const [, init] = nativeFetch.mock.calls[0]
+    expect(new Headers(init.headers).get('Authorization')).toBe('Bearer legacy-token')
+  })
+
+  it('does not attach a token to the login request', async () => {
+    const nativeFetch = vi.fn().mockResolvedValue(new Response())
+    window.fetch = nativeFetch
+    localStorage.setItem('token', 'legacy-token')
+
+    installAuthorizedFetch()
+    await window.fetch('/api/auth/login', { method: 'POST' })
+
+    const [, init] = nativeFetch.mock.calls[0]
+    expect(new Headers(init.headers).has('Authorization')).toBe(false)
+  })
+
+  it('preserves Request headers while adding authorization', async () => {
+    const nativeFetch = vi.fn().mockResolvedValue(new Response())
+    window.fetch = nativeFetch
+    localStorage.setItem('token', 'legacy-token')
+
+    installAuthorizedFetch()
+    const request = new Request('http://localhost/api/proxy', {
+      headers: { 'Content-Type': 'application/json', 'X-Request-ID': 'request-1' },
+    })
+    await window.fetch(request)
+
+    const [, init] = nativeFetch.mock.calls[0]
+    const headers = new Headers(init.headers)
+    expect(headers.get('Authorization')).toBe('Bearer legacy-token')
+    expect(headers.get('Content-Type')).toBe('application/json')
+    expect(headers.get('X-Request-ID')).toBe('request-1')
   })
 })
