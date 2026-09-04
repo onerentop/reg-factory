@@ -92,25 +92,22 @@ def test_register_uses_proxy_id_without_exposing_password(client):
     assert password not in response.text
 
 
-def test_register_uses_provided_proxy_and_mode(client):
+def test_register_top_level_mode_overrides_config_mode(client):
+    """顶层 mode 覆盖 config.mode 的解析逻辑与代理无关，走自动抢占路径单独守住。"""
     runtime = FakeRuntime()
     app.state.task_manager = runtime
     with patch(
-        "gateway.proxy_binding_service.ProxyBindingService.claim", new=AsyncMock()
-    ) as auto_claim:
+        "gateway.proxy_binding_service.ProxyBindingService.claim",
+        new=AsyncMock(return_value=_claim("socks5://1.2.3.4:1080")),
+    ):
         response = client.post(
             "/register/outlook",
-            json={
-                "proxy": "socks5://user:pw@9.9.9.9:1080",
-                "mode": "hybrid",
-                "config": {"mode": "browser"},
-            },
+            json={"mode": "hybrid", "config": {"mode": "browser"}},
         )
 
     assert response.status_code == 200
-    auto_claim.assert_not_awaited()
     call = runtime.submissions[0][1]
-    assert call["proxy"] == "socks5://user:pw@9.9.9.9:1080"
+    assert call["proxy"] == "socks5://1.2.3.4:1080"
     assert call["config"]["mode"] == "hybrid"
 
 
@@ -273,19 +270,22 @@ def test_manual_proxy_already_bound_today_is_409(client):
     assert response.status_code == 409
 
 
-def test_raw_proxy_string_bypasses_binding(client):
-    """裸连接串路径不入池、不建绑定——它指向的代理在库里没有记录。"""
+def test_raw_proxy_string_is_rejected(client):
+    """裸连接串指向的代理在库里没有记录，绑不上 binding，会绕开当天一 IP 一窗口，
+    因此整条路径关闭：直接 422，且在任何副作用之前就拒掉。"""
     runtime = FakeRuntime()
     app.state.task_manager = runtime
     with patch("gateway.proxy_binding_service.ProxyBindingService.claim",
                new=AsyncMock()) as auto, \
          patch("gateway.proxy_binding_service.ProxyBindingService.claim_specific",
-               new=AsyncMock()) as manual:
+               new=AsyncMock()) as manual, \
+         patch("gateway.registration_jobs.RegistrationJobService.enqueue",
+               new=AsyncMock()) as enqueue:
         response = client.post("/register/outlook",
                                json={"count": 2, "proxy": "socks5://u:p@9.9.9.9:1080"})
 
-    assert response.status_code == 200
+    assert response.status_code == 422
     auto.assert_not_awaited()
     manual.assert_not_awaited()
-    assert [c[1]["proxy"] for c in runtime.submissions] == [
-        "socks5://u:p@9.9.9.9:1080", "socks5://u:p@9.9.9.9:1080"]
+    enqueue.assert_not_awaited()
+    assert runtime.submissions == []

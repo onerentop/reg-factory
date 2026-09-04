@@ -58,6 +58,16 @@ async def trigger_registration(
     # 而是每个任务各抢一个当天未被占用的 IP。
     from gateway.proxy_binding_service import ACTIVE_STATUSES, ProxyBindingService
 
+    # 裸连接串指向的代理在库里没有 ProxyEntry 记录，绑不上任何 binding，
+    # 等于给「当天一 IP 一窗口」开了一道后门，故直接拒绝。
+    # schema 里保留 proxy 字段是为了让调用方拿到这条明确可执行的 422，
+    # 而不是字段被静默忽略后再去猜为什么代理没生效。
+    if body.proxy:
+        raise HTTPException(
+            status_code=422,
+            detail="不再支持直接传 proxy 连接串，请先把代理录入代理池后用 proxy_id 指定",
+        )
+
     binding_service = ProxyBindingService(session)
 
     if body.proxy_id:
@@ -79,10 +89,6 @@ async def trigger_registration(
             if claim is None:
                 raise HTTPException(status_code=409, detail="该代理今日已绑定窗口")
             proxy_url = claim.proxy_url
-        elif body.proxy:
-            # 裸连接串：该代理在库里没有记录，无法建立绑定，因此不受「当天一 IP 一窗口」约束。
-            # 保留此路径是为兼容直接调 API 的调用方；浏览器 UI 始终走 proxy_id。
-            proxy_url = body.proxy
         else:
             claim = await binding_service.claim(task_id, platform)
             if claim is None:
