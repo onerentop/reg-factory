@@ -14,7 +14,7 @@
 - `services/` needs Python 3.11+ and is installed from `services/pyproject.toml`.
 - `frontend/` uses npm and `package-lock.json`.
 - Root `.env` provides browser, proxy, captcha, Gmail SMS and Android settings. Process environment wins.
-- `BROWSER_PROVIDER=donut` is the default. Donut API defaults to `127.0.0.1:10108`; ixBrowser remains an explicit compatibility fallback.
+- `BROWSER_PROVIDER=ixbrowser` is the default (local client API on `127.0.0.1:53200`). Set `BROWSER_PROVIDER=donut` to use DonutBrowser instead (defaults to `127.0.0.1:10108`).
 
 ## Commands
 

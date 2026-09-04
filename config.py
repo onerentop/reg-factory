@@ -24,8 +24,9 @@ def _env(name: str, default: str = "") -> str:
     return os.environ.get(name, default)
 
 
-# 浏览器 provider：默认 Donut，ixBrowser 保留为本机兼容回退。
-BROWSER_PROVIDER = _env("BROWSER_PROVIDER", "donut")
+# 浏览器 provider：默认 ixBrowser（本机客户端已在运行，端口 53200）。
+# 可用 BROWSER_PROVIDER=donut 切换回 Donut。
+BROWSER_PROVIDER = _env("BROWSER_PROVIDER", "ixbrowser")
 DONUT_API_BASE = _env("DONUT_API_BASE", "http://127.0.0.1:10108")
 DONUT_API_TOKEN = _env("DONUT_API_TOKEN", "")
 DONUT_PROFILE_REUSE = _env("DONUT_PROFILE_REUSE", "true").lower() == "true"
