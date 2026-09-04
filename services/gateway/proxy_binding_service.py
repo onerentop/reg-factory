@@ -14,7 +14,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.models import ProxyBinding, ProxyEntry
 from gateway.proxy_manager import DailyUniqueAllocator, LeastUsedAllocator
 
-ACTIVE_STATUSES = ("active", "available")
+# 可被抢占的代理状态。含 "slow"：慢但连得通的代理仍是可用资源，
+# 池子只有 100 个 IP，跑一次健康检测就把慢代理踢出当天配额不划算。
+# 不含 "unknown"（ProxyEntry 的默认值）与 "unavailable"。
+ACTIVE_STATUSES = ("active", "available", "slow")
 
 
 def today_local() -> date:

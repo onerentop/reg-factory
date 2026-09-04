@@ -97,6 +97,26 @@ async def test_inactive_proxies_are_not_candidates(session):
     assert await ProxyBindingService(session).claim("task-1", "google") is None
 
 
+async def test_slow_proxies_are_still_claimable(session):
+    """慢代理仍可被抢占：池子只有 100 个 IP，一次健康检测把 slow 踢出当天
+    配额会静默缩小可用池。这是产品决策，用测试钉住，避免被"顺手收紧"。"""
+    await _add_proxy(session, status="slow")
+    assert await ProxyBindingService(session).claim("task-1", "google") is not None
+
+
+async def test_slow_proxies_can_be_manually_selected(session):
+    """手动指定路径与自动分配的状态口径必须一致，否则下拉能选、提交却报 422。"""
+    proxy = await _add_proxy(session, status="slow")
+    claim = await ProxyBindingService(session).claim_specific(proxy.id, "task-1", "google")
+    assert claim is not None
+
+
+async def test_unknown_status_still_not_claimable(session):
+    """放宽到 slow 不能顺带放进默认值 unknown——导入漏设 status 仍须被拦住。"""
+    await _add_proxy(session, status="unknown")
+    assert await ProxyBindingService(session).claim("task-1", "google") is None
+
+
 async def test_yesterday_binding_does_not_block_today(session):
     proxy = await _add_proxy(session)
     session.add(ProxyBinding(proxy_id=proxy.id, bound_date=date.today() - timedelta(days=1),
