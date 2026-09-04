@@ -2139,12 +2139,17 @@ async def _open_ixbrowser_page(bb, idx, proxy_str):
                 pass
 
 
-async def _register_one_browser(bb, idx, proxy_str):
+async def _register_one_browser(bb, idx, proxy_str, on_window=None):
     """Register via ixBrowser full browser (highest traffic, most reliable).
-    Returns (email, password[, graph]) or (None, None)."""
+    Returns (email, password[, graph]) or (None, None).
+
+    on_window: 可选回调，窗口一建成就以 profile_id 调用一次，供上层记录代理绑定。
+    """
     tag = f"[#{idx}][browser]"
     try:
         async with _open_ixbrowser_page(bb, idx, proxy_str) as (page, context, _pid):
+            if on_window is not None:
+                on_window(_pid)
             print(f"  {tag} ixBrowser connected")
             # NOTE: resource blocking intentionally disabled in browser mode.
             # PerimeterX behavioral analysis can detect modified network patterns.

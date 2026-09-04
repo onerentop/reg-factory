@@ -68,7 +68,10 @@ async def execute_registration(
     if emit is not None:
         emit({"type": "status", "task_id": task_id, "status": "running", "platform": platform})
 
-    flow = FlowRegistry.get(platform)
+    from worker.flows.base import QueueEventEmitter
+
+    emitter = QueueEventEmitter(emit, task_id, platform) if emit is not None else None
+    flow = FlowRegistry.get(platform, services=emitter)
     results = await flow.run(context, from_step=from_step)
     success = bool(results) and all(result.success for result in results)
     account_email = str(context.get("email", ""))

@@ -36,7 +36,7 @@ def test_mode_protocol_dispatches(monkeypatch):
 
 def test_default_mode_is_browser(monkeypatch):
     called = {}
-    async def fake_browser(bb, idx, proxy_str):
+    async def fake_browser(bb, idx, proxy_str, on_window=None):
         called["mode"] = "browser"; return ("b@outlook.com", "Pw!", None)
     monkeypatch.setitem(sys.modules, "register_outlook_standalone",
                         _fake_module("register_outlook_standalone", _register_one_browser=fake_browser))
@@ -48,3 +48,49 @@ def test_default_mode_is_browser(monkeypatch):
     ctx = {"proxy": "p", "idx": 0}
     res = asyncio.run(flow._step_register(ctx, None))
     assert called["mode"] == "browser" and res.success is True
+
+
+async def test_outlook_flow_emits_binding_when_window_opens():
+    """窗口一建成就上报 profile_id，不等注册跑完——子进程中途崩溃也不会丢失
+    「窗口已建成」这个事实，否则父进程会错误地把已暴露的 IP 还回池子。"""
+    from unittest.mock import patch
+    from worker.flows.outlook import OutlookRegistrationFlow
+
+    sent = []
+
+    class _Emitter:
+        def emit(self, event_type, data):
+            sent.append((event_type, data))
+
+    async def _fake_register(bb, idx, proxy_str, on_window=None):
+        on_window(999)                      # 模拟窗口建成
+        return ("a@outlook.com", "pw", None)
+
+    flow = OutlookRegistrationFlow(_Emitter())
+    with patch("common.browser_provider.get_browser_provider", return_value=object()), \
+         patch("register_outlook_standalone._register_one_browser", new=_fake_register):
+        result = await flow._step_register(
+            {"proxy": "", "idx": 0, "mode": "browser"}, flow.services)
+
+    assert result.success
+    assert sent[0][0] == "binding"
+    assert sent[0][1]["profile_id"] == "999"
+
+
+async def test_outlook_flow_without_services_does_not_crash():
+    """services 为 None 时（既有调用方式）流程必须照常工作。"""
+    from unittest.mock import patch
+    from worker.flows.outlook import OutlookRegistrationFlow
+
+    async def _fake_register(bb, idx, proxy_str, on_window=None):
+        if on_window is not None:
+            on_window(999)
+        return ("a@outlook.com", "pw", None)
+
+    flow = OutlookRegistrationFlow(None)
+    with patch("common.browser_provider.get_browser_provider", return_value=object()), \
+         patch("register_outlook_standalone._register_one_browser", new=_fake_register):
+        result = await flow._step_register(
+            {"proxy": "", "idx": 0, "mode": "browser"}, flow.services)
+
+    assert result.success

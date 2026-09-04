@@ -5,9 +5,10 @@ from worker.flows.base import (
 
 
 class _FakeFlow(RegistrationFlow):
-    def __init__(self):
-        # 不调用 super().__init__（避免 LegacyBridge），仅本测试用
-        self.services = None
+    def __init__(self, services=None):
+        # 不调用 super().__init__（避免 LegacyBridge），仅本测试用。
+        # 形参与 FlowRegistry.get 的 flow_cls(services) 注入契约保持一致。
+        self.services = services
         self.calls = []
 
     def get_steps(self):
@@ -72,3 +73,39 @@ def test_flow_registry_unknown_raises():
         assert False, "should raise"
     except ValueError:
         pass
+
+
+# ──────────────────────────────────────────────
+# TaskEventEmitter
+# ──────────────────────────────────────────────
+
+def test_queue_event_emitter_wraps_payload_with_task_context():
+    from worker.flows.base import QueueEventEmitter
+
+    sent = []
+    emitter = QueueEventEmitter(sent.append, "task-1", "google")
+    emitter.emit("binding", {"profile_id": "777", "profile_name": "a@gmail.com"})
+
+    assert sent == [{"type": "binding", "task_id": "task-1", "platform": "google",
+                     "profile_id": "777", "profile_name": "a@gmail.com"}]
+
+
+def test_flow_registry_injects_services():
+    from worker.flows.base import FlowRegistry, RegistrationFlow
+
+    class _Flow(RegistrationFlow):
+        def get_steps(self): return []
+
+    FlowRegistry.register("unit-test-platform", _Flow)
+    sentinel = object()
+    assert FlowRegistry.get("unit-test-platform", services=sentinel).services is sentinel
+
+
+def test_flow_registry_defaults_services_to_none():
+    from worker.flows.base import FlowRegistry, RegistrationFlow
+
+    class _Flow(RegistrationFlow):
+        def get_steps(self): return []
+
+    FlowRegistry.register("unit-test-platform-2", _Flow)
+    assert FlowRegistry.get("unit-test-platform-2").services is None

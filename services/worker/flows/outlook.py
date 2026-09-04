@@ -39,7 +39,15 @@ class OutlookRegistrationFlow(RegistrationFlow):
             from common.browser_provider import get_browser_provider
             from register_outlook_standalone import _register_one_browser
             bb = get_browser_provider()
-            result = await _register_one_browser(bb, idx, proxy_str)
+
+            # 窗口一建成就上报，不等注册跑完：子进程中途崩溃时，末尾上报永远到不了，
+            # 父进程会把已暴露给目标站点的 IP 当作「从未建窗」还回当天配额。
+            def _on_window(pid):
+                if services is not None:
+                    services.emit("binding", {"profile_id": str(pid),
+                                              "profile_name": context.get("email", "")})
+
+            result = await _register_one_browser(bb, idx, proxy_str, on_window=_on_window)
             if result and len(result) >= 2 and result[0]:
                 email, password = result[0], result[1]
                 graph_token = result[2] if len(result) > 2 else None

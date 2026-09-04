@@ -142,6 +142,7 @@ class LocalProcessTaskManager:
                 event_type="interrupted",
                 error="本机服务正在关闭；任务已中断",
             )
+            await self._release_binding(task_id)
             await self._broadcast(task_id, persisted)
         for job in pending_jobs:
             persisted = await self._persist_status(
@@ -151,6 +152,7 @@ class LocalProcessTaskManager:
                 event_type="interrupted",
                 error="本机服务正在关闭；任务未启动",
             )
+            await self._release_binding(job["task_id"])
             await self._broadcast(job["task_id"], persisted)
 
         self._event_queue.close()
@@ -309,6 +311,7 @@ class LocalProcessTaskManager:
                     error="任务返回结果必须是对象",
                     data={"result_type": type(result).__name__},
                 )
+                await self._finalize_binding(task_id, False)
             else:
                 success = bool(result.get("success", False))
                 persisted = await self._persist_status(
@@ -320,6 +323,7 @@ class LocalProcessTaskManager:
                     error=None if success else result.get("error") or "任务返回未成功结果",
                     data=result,
                 )
+                await self._finalize_binding(task_id, success)
         elif event_type == "failed":
             persisted = await self._persist_status(
                 task_id,
@@ -330,6 +334,12 @@ class LocalProcessTaskManager:
                 message=event["error"],
                 data={"traceback": event.get("traceback")},
             )
+            await self._finalize_binding(task_id, False)
+        elif event_type == "binding":
+            await self._persist_binding(
+                task_id, event.get("profile_id"), event.get("profile_name")
+            )
+            return
         elif event_type == "done":
             current = await self.get_job(task_id)
             if current is None:
@@ -342,6 +352,7 @@ class LocalProcessTaskManager:
                     event_type="done",
                     error="任务进程已退出但未返回结果",
                 )
+                await self._finalize_binding(task_id, False)
             else:
                 persisted = await self._persist_status(
                     task_id,
@@ -388,9 +399,38 @@ class LocalProcessTaskManager:
                 error=error,
             )
             await self._broadcast(task_id, persisted)
+        await self._finalize_binding(task_id, False)
         self._processes.pop(task_id, None)
         self._clean_exit_since.pop(task_id, None)
         await self._start_pending()
+
+    async def _persist_binding(
+        self, task_id: str, profile_id: str | None, profile_name: str | None
+    ) -> None:
+        """回填窗口 ID：该 IP 当天从此永久占用。"""
+        from app.core.dependencies import db
+        from gateway.proxy_binding_service import ProxyBindingService
+
+        if not profile_id:
+            return
+        async with db.get_session() as session:
+            await ProxyBindingService(session).mark_opened(task_id, profile_id, profile_name)
+
+    async def _finalize_binding(self, task_id: str, success: bool) -> None:
+        """终态收尾：窗口建过的保留占用，没建成的还回当天配额。"""
+        from app.core.dependencies import db
+        from gateway.proxy_binding_service import ProxyBindingService
+
+        async with db.get_session() as session:
+            await ProxyBindingService(session).finalize(task_id, success)
+
+    async def _release_binding(self, task_id: str) -> None:
+        """中断/崩溃恢复：清掉从未建成窗口的占位，避免白烧 IP。"""
+        from app.core.dependencies import db
+        from gateway.proxy_binding_service import ProxyBindingService
+
+        async with db.get_session() as session:
+            await ProxyBindingService(session).release_unopened(task_id)
 
     async def _persist_status(
         self,

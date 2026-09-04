@@ -33,6 +33,27 @@ def LegacyBridgeStep(name: str, run: StepFn) -> Step:
     return Step(name=name, run=run, kind="legacy")
 
 
+class TaskEventEmitter(ABC):
+    """子进程向父进程回传事件的契约。子进程不写库，一切经父进程落库。"""
+
+    @abstractmethod
+    def emit(self, event_type: str, data: dict) -> None:
+        ...
+
+
+class QueueEventEmitter(TaskEventEmitter):
+    """把事件塞进 multiprocessing.Queue，由父进程 _handle_event 落库。"""
+
+    def __init__(self, emit: Callable[[dict], None], task_id: str, platform: str):
+        self._emit = emit
+        self._task_id = task_id
+        self._platform = platform
+
+    def emit(self, event_type: str, data: dict) -> None:
+        self._emit({"type": event_type, "task_id": self._task_id,
+                    "platform": self._platform, **data})
+
+
 class RegistrationFlow(ABC):
     """注册流程抽象基类。模板方法 run() 定义步骤执行骨架。
 
@@ -81,11 +102,11 @@ class FlowRegistry:
     _flows: dict[str, type[RegistrationFlow]] = {}
 
     @classmethod
-    def get(cls, platform: str) -> RegistrationFlow:
+    def get(cls, platform: str, services: Any = None) -> RegistrationFlow:
         flow_cls = cls._flows.get(platform)
         if flow_cls is None:
             raise ValueError(f"Unknown platform: {platform}")
-        return flow_cls()
+        return flow_cls(services)
 
     @classmethod
     def register(cls, platform: str, flow_cls: type[RegistrationFlow]) -> None:
