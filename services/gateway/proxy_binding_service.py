@@ -112,7 +112,12 @@ class ProxyBindingService:
         await self._session.execute(
             update(ProxyBinding)
             .where(ProxyBinding.task_id == task_id, ProxyBinding.status == "claimed")
-            .values(status="opened", profile_id=str(profile_id), profile_name=profile_name)
+            .values(
+                status="opened",
+                # 显式判 None：无条件 str() 会把 None 写成 4 字符的 "None"，UI 会原样渲染
+                profile_id=str(profile_id) if profile_id is not None else None,
+                profile_name=profile_name,
+            )
         )
 
     async def finalize(self, task_id: str, success: bool) -> None:

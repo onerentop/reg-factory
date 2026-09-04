@@ -4,6 +4,7 @@ from datetime import date, timedelta
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from gateway.models import ProxyBinding, ProxyEntry
@@ -112,6 +113,29 @@ async def test_finalize_keeps_opened_binding_on_failure(session):
     await svc.mark_opened("task-1", "777", None)
     await svc.finalize("task-1", success=False)
     assert await svc.claim("task-2", "google") is None
+
+
+async def test_mark_opened_with_none_profile_id_stays_null(session):
+    """profile_id=None 必须落成 SQL NULL，不能是 4 字符的字符串 "None"。"""
+    await _add_proxy(session)
+    svc = ProxyBindingService(session)
+    await svc.claim("task-1", "google")
+    await svc.mark_opened("task-1", None)
+    session.expire_all()                                   # 强制回库读，绕开身份映射
+    binding = (await session.execute(select(ProxyBinding))).scalar_one()
+    assert binding.status == "opened"
+    assert binding.profile_id is None
+    assert binding.profile_id != "None"
+
+
+async def test_default_status_proxy_is_not_claimable(session):
+    """ProxyEntry.status 默认是 'unknown'，不可被抢占。
+    导入路径若忘记显式设 status='active'，整池会静默不可用——此测试是那道防线。"""
+    proxy = ProxyEntry(type="http", host="1.2.3.4", port=8080, username="u", password="p")
+    session.add(proxy)
+    await session.flush()
+    assert proxy.status == "unknown"
+    assert await ProxyBindingService(session).claim("task-1", "google") is None
 
 
 async def test_today_summary_counts_total_and_today(session):
