@@ -40,10 +40,12 @@ class RandomAllocator(ProxyAllocator):
 
 
 class LeastUsedAllocator(ProxyAllocator):
-    """最少使用优先。"""
+    """最少使用优先。usage 可传入外部计数（如 DB 里的累计绑定数）作为初始种子。"""
 
-    def __init__(self):
+    def __init__(self, usage: dict[str, int] | None = None):
         self._usage: dict[str, int] = defaultdict(int)
+        if usage:
+            self._usage.update(usage)
 
     def select(self, proxies: list[dict]) -> dict | None:
         if not proxies:
@@ -66,6 +68,21 @@ class RegionAllocator(ProxyAllocator):
             if regional:
                 return random.choice(regional)
         return self._fallback.select(proxies)
+
+
+class DailyUniqueAllocator(ProxyAllocator):
+    """装饰器：先滤掉当天已绑定的代理，再委托内层策略挑选。
+
+    与 DB 无关——调用方负责把「今日已绑定的 proxy id 集合」查出来传进来，
+    本类只做过滤与委托，可纯单测。
+    """
+
+    def __init__(self, inner: ProxyAllocator, bound_today: set[str]):
+        self._inner = inner
+        self._bound = bound_today
+
+    def select(self, proxies: list[dict]) -> dict | None:
+        return self._inner.select([p for p in proxies if str(p.get("id", "")) not in self._bound])
 
 
 ALLOCATOR_MAP: dict[str, type[ProxyAllocator]] = {
