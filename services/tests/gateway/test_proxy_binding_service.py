@@ -1,15 +1,34 @@
 """绑定抢占服务测试。用内存 SQLite 建真表，验证唯一约束真的拦得住。"""
 import uuid
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 import pytest
 import pytest_asyncio
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
+from gateway import proxy_binding_service as pbs
 from gateway.models import ProxyBinding, ProxyEntry
-from gateway.proxy_binding_service import ProxyBindingService, build_proxy_url
+from gateway.proxy_binding_service import ProxyBindingService, build_proxy_url, today_local
 from shared.base_model import BaseModel
+
+
+class _FakeClock:
+    """本地 2026-09-05 01:00 / UTC 2026-09-04 17:00——两个时钟的自然日不同。
+
+    UTC+8 的机器上，本地 00:00-07:59 这个窗口里两者才会分家。
+    真实时钟几乎永远撞不上它，所以只能把时钟钉死来测。
+    """
+
+    @staticmethod
+    def now(tz=None):
+        if tz is not None:                       # datetime.now(timezone.utc) 写法
+            return datetime(2026, 9, 4, 17, 0, tzinfo=tz)
+        return datetime(2026, 9, 5, 1, 0)
+
+    @staticmethod
+    def utcnow():                                # datetime.utcnow() 写法
+        return datetime(2026, 9, 4, 17, 0)
 
 
 @pytest_asyncio.fixture
@@ -147,6 +166,49 @@ async def test_today_summary_counts_total_and_today(session):
     summary = await ProxyBindingService(session).today_summary()
     assert summary[str(proxy.id)]["total_bound"] == 2
     assert summary[str(proxy.id)]["today_bound"] == 1
+
+
+async def test_claim_specific_rejects_inactive_proxy(session):
+    """手动路径必须和 claim() 用同一道状态闸门，否则死代理照样能被绑上窗口。"""
+    proxy = await _add_proxy(session, status="inactive")
+    assert await ProxyBindingService(session).claim_specific(proxy.id, "task-1", "google") is None
+
+
+async def test_list_bindings_returns_newest_first(session):
+    proxy = await _add_proxy(session)
+    for offset, task in [(2, "old"), (1, "mid")]:
+        session.add(ProxyBinding(proxy_id=proxy.id, bound_date=date.today() - timedelta(days=offset),
+                                 task_id=task, status="success"))
+    await session.flush()
+    svc = ProxyBindingService(session)
+    await svc.claim("task-now", "google")
+    bindings = await svc.list_bindings(proxy.id)
+    assert [b.task_id for b in bindings] == ["task-now", "mid", "old"]
+
+
+async def test_quota_reports_pool_usage(session):
+    await _add_proxy(session, host="1.1.1.1")
+    await _add_proxy(session, host="2.2.2.2")
+    await _add_proxy(session, host="3.3.3.3", status="inactive")   # 不计入总额
+    svc = ProxyBindingService(session)
+    assert await svc.quota() == {"total": 2, "used_today": 0, "available_today": 2}
+    await svc.claim("task-1", "google")
+    assert await svc.quota() == {"total": 2, "used_today": 1, "available_today": 1}
+
+
+def test_today_local_tracks_local_clock_not_utc(monkeypatch):
+    """钉死设计决策：自然日取本地时钟。实现改成 UTC 必须红。"""
+    monkeypatch.setattr(pbs, "datetime", _FakeClock)
+    assert today_local() == date(2026, 9, 5)          # 若取 UTC 则是 09-04
+
+
+async def test_bound_date_uses_local_date_when_utc_disagrees(session, monkeypatch):
+    """落库的 bound_date 本身也必须是本地自然日，不只是 today_local() 的返回值。"""
+    await _add_proxy(session)
+    monkeypatch.setattr(pbs, "datetime", _FakeClock)
+    await ProxyBindingService(session).claim("task-1", "google")
+    binding = (await session.execute(select(ProxyBinding))).scalar_one()
+    assert binding.bound_date == date(2026, 9, 5)
 
 
 def test_build_proxy_url_without_credentials():

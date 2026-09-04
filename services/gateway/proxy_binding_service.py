@@ -41,7 +41,7 @@ class ProxyBindingService:
 
     # ---------------- 查询 ----------------
 
-    async def get_proxy(self, proxy_id) -> ProxyEntry | None:
+    async def get_proxy(self, proxy_id: str | uuid.UUID) -> ProxyEntry | None:
         try:
             identifier = proxy_id if isinstance(proxy_id, uuid.UUID) else uuid.UUID(str(proxy_id))
         except ValueError:
@@ -88,9 +88,13 @@ class ProxyBindingService:
         bound = await self._bound_today_ids()
         usage = await self._usage_counts()
 
+        # allocator 与 payload 都是循环不变量：bound 按引用传入，下面的 bound.add()
+        # 对下一次 select() 自然可见，无需重建。重建反而会丢掉本次调用累计的 usage。
+        allocator = DailyUniqueAllocator(LeastUsedAllocator(usage), bound)
+        payload = [{"id": str(p.id)} for p in candidates]
+
         while True:
-            allocator = DailyUniqueAllocator(LeastUsedAllocator(usage), bound)
-            picked = allocator.select([{"id": str(p.id)} for p in candidates])
+            picked = allocator.select(payload)
             if picked is None:
                 return None
             proxy = by_id[picked["id"]]
@@ -99,10 +103,17 @@ class ProxyBindingService:
                 return claim
             bound.add(str(proxy.id))          # 被并发任务抢走，换下一个
 
-    async def claim_specific(self, proxy_id, task_id: str, platform: str) -> ProxyClaim | None:
-        """手动指定路径。该代理今日已绑返回 None（调用方转 409）。"""
+    async def claim_specific(
+        self, proxy_id: str | uuid.UUID, task_id: str, platform: str
+    ) -> ProxyClaim | None:
+        """手动指定路径。返回 None 有两种原因：代理不可用（状态不在 ACTIVE_STATUSES）
+        或今日已绑。调用方需先自行查状态以便区分错误码。
+
+        状态闸门与 claim() 保持一致——否则健康检查刚标成 unavailable 的死代理，
+        仍会被手动路径绑上窗口，白白烧掉一次尝试和该 IP 当天的额度。
+        """
         proxy = await self.get_proxy(proxy_id)
-        if proxy is None:
+        if proxy is None or proxy.status not in ACTIVE_STATUSES:
             return None
         return await self._insert_binding(proxy, task_id, platform)
 
@@ -131,10 +142,7 @@ class ProxyBindingService:
             .where(ProxyBinding.task_id == task_id, ProxyBinding.status == "opened")
             .values(status="success" if success else "failed")
         )
-        await self._session.execute(
-            delete(ProxyBinding)
-            .where(ProxyBinding.task_id == task_id, ProxyBinding.status == "claimed")
-        )
+        await self.release_unopened(task_id)
 
     async def release_unopened(self, task_id: str) -> None:
         """崩溃恢复用：清掉从未建成窗口的占位。"""
@@ -167,7 +175,9 @@ class ProxyBindingService:
             entry["today_profile_name"] = binding.profile_name
         return summary
 
-    async def list_bindings(self, proxy_id, limit: int = 50, offset: int = 0) -> list[ProxyBinding]:
+    async def list_bindings(
+        self, proxy_id: str | uuid.UUID, limit: int = 50, offset: int = 0
+    ) -> list[ProxyBinding]:
         proxy = await self.get_proxy(proxy_id)
         if proxy is None:
             return []
