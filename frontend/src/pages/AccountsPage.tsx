@@ -149,7 +149,7 @@ export default function AccountsPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          count: selectedProxyId ? 1 : registerCount,
+          count: registerCount,
           proxy_id: selectedProxyId || undefined,
           mode: registerMode,
         }),
@@ -511,16 +511,10 @@ export default function AccountsPage() {
               <InputNumber
                 min={1}
                 max={20}
-                value={selectedProxyId ? 1 : registerCount}
-                disabled={!!selectedProxyId}
+                value={registerCount}
                 onChange={(v) => setRegisterCount(v || 1)}
                 style={{ width: '100%' }}
               />
-              {selectedProxyId && (
-                <div style={{ color: 'var(--text-secondary)', fontSize: 12, marginTop: 6 }}>
-                  指定代理时每次只能注册 1 个（当天一个 IP 只绑一个窗口）
-                </div>
-              )}
             </div>
             <div style={{ marginBottom: 20 }}>
               <label style={{ display: 'block', marginBottom: 6, fontSize: 13, fontWeight: 600, color: 'var(--text-secondary)' }}>使用代理</label>
