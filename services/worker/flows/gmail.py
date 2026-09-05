@@ -46,10 +46,6 @@ class GmailRegistrationFlow(RegistrationFlow):
         context["_pid"] = pid
         context["_page"] = page
         context["_context"] = ctx
-        # 必须在此刻上报：等 flow 跑完再报，子进程中途崩溃就会丢失「窗口已建成」的
-        # 事实，父进程会把已暴露给目标站点的 IP 错误地还回当天配额。
-        if services is not None:
-            services.emit("binding", {"profile_id": str(pid), "profile_name": window_name})
         signup_url = build_signup_url()
         await page.goto(signup_url, timeout=60000, wait_until="domcontentloaded")
         await asyncio.sleep(3)
