@@ -113,3 +113,55 @@ def test_open_browser_raises_when_never_ready():
     with patch("common.ant_provider.time.sleep"):      # 免真 sleep 15s
         with pytest.raises(AntAPIError):
             p.open_browser("uuid-1")
+
+
+def test_close_browser_stops_with_profile_selector():
+    p, call = _provider_with_fake_call()
+    call.return_value = {"ok": True}
+    p.close_browser("uuid-1")
+    method, path, body = call.call_args[0]
+    assert method == "POST" and path == "/api/runtime/stop"
+    assert body == {"profileId": "uuid-1"}
+
+
+def test_close_browser_swallows_errors():
+    p, call = _provider_with_fake_call()
+    call.side_effect = AntAPIError(400, "POST", "/api/runtime/stop", "bad")
+    p.close_browser("uuid-1")   # 不抛
+
+
+def test_delete_browser_stops_then_deletes():
+    p, call = _provider_with_fake_call()
+    call.return_value = {"ok": True}
+    p.delete_browser("uuid-1")
+    paths = [c[0][1] for c in call.call_args_list]
+    assert "/api/runtime/stop" in paths
+    assert "/api/profiles/uuid-1" in paths
+
+
+def test_delete_browser_swallows_errors():
+    p, call = _provider_with_fake_call()
+    call.side_effect = AntAPIError(409, "DELETE", "/api/profiles/uuid-1", "running")
+    p.delete_browser("uuid-1")   # 不抛
+
+
+def test_list_browsers_maps_fields():
+    p, call = _provider_with_fake_call()
+    call.return_value = {"count": 2, "items": [
+        {"profileId": "a", "profileName": "n1", "userDataDir": "d1"},
+        {"profileId": "b", "profileName": "n2", "userDataDir": "d2"},
+    ]}
+    out = p.list_browsers()
+    rows = out["data"]["list"]
+    assert rows[0] == {"id": "a", "name": "n1", "remark": "d1", "seq": "a"}
+    assert len(rows) == 2
+
+
+def test_cleanup_browsers_deletes_beyond_keep():
+    p, call = _provider_with_fake_call()
+    # 第一次 _call 是 GET /api/profiles(列表),之后是 stop/delete(吞异常)
+    call.side_effect = [
+        {"items": [{"profileId": "a"}, {"profileId": "b"}, {"profileId": "c"}]},
+    ] + [{"ok": True}] * 10
+    n = p.cleanup_browsers(keep=1)
+    assert n == 2   # 保留 1 个,删 2 个

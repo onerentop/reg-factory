@@ -126,16 +126,59 @@ class AntBrowserProvider(BrowserProvider):
         raise AntAPIError(0, "GET", "/api/runtime/active", "debug not ready")
 
     def close_browser(self, profile_id):
-        raise NotImplementedError
+        try:
+            self._call("POST", "/api/runtime/stop", {"profileId": profile_id})
+        except Exception:
+            pass
 
     def delete_browser(self, profile_id):
-        raise NotImplementedError
+        # delete 对运行中实例返回 409,必须先 stop
+        try:
+            self._call("POST", "/api/runtime/stop", {"profileId": profile_id})
+        except Exception:
+            pass
+        try:
+            self._call("DELETE", f"/api/profiles/{profile_id}", None)
+        except Exception:
+            pass
 
-    def cleanup_browsers(self, keep=0):
-        raise NotImplementedError
+    def _fetch_all_profiles(self):
+        return self._call("GET", "/api/profiles").get("items", [])
 
     def list_browsers(self, page=0, page_size=100):
-        raise NotImplementedError
+        rows = [{
+            "id": p.get("profileId"),
+            "name": p.get("profileName", ""),
+            "remark": p.get("userDataDir", ""),
+            "seq": p.get("profileId", ""),
+        } for p in self._fetch_all_profiles()]
+        return {"data": {"list": rows}}
+
+    def cleanup_browsers(self, keep=0):
+        rows = self._fetch_all_profiles()
+        to_delete = rows[keep:]
+        for p in to_delete:
+            self.delete_browser(p.get("profileId"))
+        return len(to_delete)
 
     def select_browser(self):
-        raise NotImplementedError
+        rows = self._fetch_all_profiles()
+        print("\n可用的浏览器实例:")
+        print("-" * 50)
+        if rows:
+            for i, p in enumerate(rows):
+                print(f"  [{i}] {p.get('profileId')}  {p.get('profileName', '未命名')}")
+        else:
+            print("  (无)")
+        print("  [n] 创建新实例")
+        print("-" * 50)
+        while True:
+            max_idx = len(rows) - 1 if rows else -1
+            hint = f"[0-{max_idx}/n]" if rows else "[n]"
+            choice = input(f"请选择 {hint}: ").strip().lower()
+            if choice == "n":
+                name = input("实例名称 (留空自动): ").strip() or f"reg_{len(rows) + 1}"
+                return self.create_browser(name=name)
+            if rows and choice.isdigit() and 0 <= int(choice) < len(rows):
+                return rows[int(choice)].get("profileId")
+            print("无效选择,请重新输入。")
