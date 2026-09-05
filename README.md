@@ -11,7 +11,7 @@
 - **Google Android 注册**：`gmail_android/` 的 BlueStacks + Appium 独立路径；默认在手机或安全验证步骤停下，需操作者处理后继续。
 - **代理管理**：代理 CRUD、可用性检测、状态切换；注册 UI 只上传 `proxy_id`，认证串只在服务端组装。
 - **本机任务控制**：有界 Windows 子进程、SQLite Job/事件持久化、任务日志 WebSocket 回放、应用重启后的安全中断标记。
-- **浏览器 provider**：默认 ixBrowser（本机客户端），可显式切到 `BROWSER_PROVIDER=donut` 使用 DonutBrowser/Wayfern。
+- **浏览器 provider**：默认 Ant Browser（本地 API 19876），可切 ixBrowser / donut。
 
 ## 结构
 
@@ -28,7 +28,7 @@ gmail_android/            独立 BlueStacks/Appium Google 流程
 ## 前置条件
 
 - Windows 10/11、Python 3.11+（services）与 Node.js。
-- ixBrowser 客户端正在运行（本地 API 默认 `127.0.0.1:53200`）；或自行设 `BROWSER_PROVIDER=donut` 并保证 DonutBrowser 正在运行（默认 `http://127.0.0.1:10108`，需已下载 Wayfern core）。
+- Ant Browser 正在运行，设置页已启用启动 API 服务（默认端口 19876）；或自行设 `BROWSER_PROVIDER=ixbrowser`/`donut`。
 - Outlook/Google 实际注册按需要配置代理与接码凭据。
 - 复制 `.env.example` 为 `.env`，仅填写需要的项；不要提交 `.env`。
 
