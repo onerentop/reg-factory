@@ -72,44 +72,57 @@ class AntBrowserProvider(BrowserProvider):
 
 `X-Ant-Api-Key` 头仅在 `api_key` 非空时附加。
 
-### 3.2 create_browser
+### 3.2 create_browser（已实测校准）
+
+请求体是**嵌套**结构 `{"profile": {...ProfileInput...}}`,响应 HTTP 201,`profileId` 在**顶层**。
 
 ```python
 def create_browser(self, name="reg", proxy_str=None, **kwargs):
     proxy_config = proxy_str.strip() if proxy_str and proxy_str.strip() else "direct://"
-    body = {"profileName": name, "proxyConfig": proxy_config, "coreId": kwargs.get("core_id", "")}
+    body = {"profile": {"profileName": name, "proxyConfig": proxy_config,
+                        "coreId": kwargs.get("core_id", "")}}  # coreId 空→默认内核
     result = self._call("POST", "/api/profiles", body)
-    return result["item"]["profileId"]  # 具体字段名以实测响应为准
+    return result["profileId"]   # 实测:顶层 profileId(UUID)
 ```
 
-`coreId` 空 → Ant 用默认内核。响应取 `profileId`(UUID)。
+实测响应键:`{created, launchCode, launched, ok, profile, profileId, profileName, updated}`。
 
-### 3.3 open_browser（含轮询）
+### 3.3 open_browser（launch 同步返回 debugPort,无需轮询）
+
+实测:`POST /api/launch {profileId}` 同步返回 `{debugPort, debugReady:true, cdpUrl, pid, launchCode}`。无需轮询 runtime/active。保留一个 debugReady 断言 + 短重试兜底(极端情况 debugReady 可能瞬时未就绪)。
 
 ```python
 def open_browser(self, profile_id):
-    self._call("POST", "/api/launch", {"profileId": profile_id})
-    # 轮询 runtime/active 到 debugReady(浏览器启动需几秒),超时抛错
-    deadline = time.time() + 60
-    while time.time() < deadline:
+    r = self._call("POST", "/api/launch", {"profileId": profile_id})
+    debug_port = r.get("debugPort")
+    if r.get("debugReady") and debug_port:
+        http_ep = f"http://127.0.0.1:{debug_port}"
+        return {"ws": http_ep, "http": http_ep}
+    # 兜底:短轮询 runtime/active(实测通常首次即就绪)
+    for _ in range(15):
         rt = self._call("GET", "/api/runtime/active")
         if rt.get("profileId") == profile_id and rt.get("debugReady") and rt.get("debugPort"):
             http_ep = f"http://127.0.0.1:{rt['debugPort']}"
             return {"ws": http_ep, "http": http_ep}
         time.sleep(1)
-    raise AntAPIError(0, "GET", "/api/runtime/active", "debug not ready in 60s")
+    raise AntAPIError(0, "GET", "/api/runtime/active", "debug not ready")
 ```
 
-返回的 `ws` 用 http 端点,交由 `open_and_connect` 的 `connect_over_cdp` 自动发现真实 ws。
+`http://127.0.0.1:{debugPort}` 是真实 Chrome DevTools 端点,交由 `open_and_connect` 的 `connect_over_cdp` 自动发现 ws。(Ant 另给 `cdpUrl=http://127.0.0.1:19876` 是它自己的 CDP 代理,不用它。)
 
-### 3.4 close / delete / cleanup / list / select
+### 3.4 close / delete / cleanup / list / select（stop 需 selector,delete 须先 stop）
+
+实测坑:`stop` 空 body 返回 400,需带 `{"profileId":pid}` selector;`delete` 对**运行中**实例返回 409,必须先 stop。
 
 ```python
 def close_browser(self, profile_id):
-    try: self._call("POST", "/api/runtime/stop", {})   # 停当前活跃
+    try: self._call("POST", "/api/runtime/stop", {"profileId": profile_id})  # 需 selector
     except Exception: pass
 
 def delete_browser(self, profile_id):
+    # 先确保已停(delete 运行中实例返回 409)
+    try: self._call("POST", "/api/runtime/stop", {"profileId": profile_id})
+    except Exception: pass
     try: self._call("DELETE", f"/api/profiles/{profile_id}", None)
     except Exception: pass
 
@@ -123,9 +136,10 @@ def list_browsers(self, page=0, page_size=100):
     return {"data": {"list": rows}}
 
 def cleanup_browsers(self, keep=0):
-    rows = self._fetch_all_profiles()
-    to_delete = rows[keep:]  # 保留前 keep 个;排序规则以实测创建时间字段为准
-    ...删除并计数
+    rows = self._fetch_all_profiles()          # items 顺序即创建顺序
+    to_delete = rows[keep:]                     # 保留前 keep 个
+    for p in to_delete: self.delete_browser(p["profileId"])   # delete 内含 stop
+    return len(to_delete)
 
 def select_browser(self):
     # 交互式列出 + 选择/新建,仿 ixBrowser
@@ -172,11 +186,21 @@ else:  # ixbrowser
 
 单测全部 mock,不触发真实浏览器启动。smoke 会真实启动浏览器,需显式授权。
 
-## 8. 实测待定项（实现时以真实响应校准）
+## 8. 实测校准结果（已对运行中的 Ant API 打过一轮,创建→launch→stop→delete 全走通并清理)
 
-- `POST /api/profiles` 成功响应里 profileId 的确切路径(`item.profileId` / `data.profileId` / 顶层)。
-- `POST /api/launch` 是否也直接返回 debugPort(可省一次轮询),还是必须轮询 runtime/active。
-- `cleanup_browsers` 排序依据的创建时间字段名。
-- `proxyConfig` 对 socks5 带认证的确切接受格式(实测一条)。
+| 项 | 校准结论 |
+|---|---|
+| 创建请求体 | 嵌套 `{"profile": {profileName, proxyConfig, coreId}}`,**非扁平**;HTTP 201 |
+| profileId 位置 | 响应**顶层** `profileId`(UUID) |
+| launch 返回 | `POST /api/launch {profileId}` **同步**返回 `{debugPort, debugReady:true, cdpUrl, pid, launchCode}`,**无需轮询** |
+| CDP 端点 | `http://127.0.0.1:{debugPort}`(真实 Chrome 端点);`cdpUrl` 是 Ant 自己的代理,不用 |
+| stop 参数 | 需 `{"profileId":pid}` selector;**空 body 返回 400** |
+| delete 时机 | 运行中实例 delete **返回 409**,必须先 stop |
+| proxyConfig | URL scheme,直连 `direct://`;创建时接受(连通性校验发生在 launch,非 create) |
+| coreId | 可空,空则用默认内核 |
 
-这些不改变架构,实现首步先对真实 API 打一轮,校准字段名。
+以上已全部并入第 3 节代码骨架。实现时无剩余未知项。
+
+## 9. 唯一仍需实测的边界项
+
+- socks5/http 带认证代理经 Ant launch 后**出口 IP 是否正确**(create 阶段不校验连通性,只有真 launch 才验证)。此项在实现的 smoke 测试里用一条真实 Webshare 代理验证,不阻塞架构。
