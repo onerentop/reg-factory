@@ -31,11 +31,6 @@ if sys.platform == "win32":
 from config import ANT_API_BASE, ANT_API_KEY
 from common.browser_provider import BrowserProvider
 
-_RETRYABLE = [
-    "connection refused", "connection reset", "econnrefused", "econnreset",
-    "timed out", "timeout", "network", "socket", "urlopen error",
-]
-
 
 class AntAPIError(Exception):
     """Ant REST API 调用错误(含 HTTP 状态)。"""
@@ -80,21 +75,19 @@ class AntBrowserProvider(BrowserProvider):
         except urllib.error.URLError as e:
             raise AntAPIError(0, method, path, f"URLError: {e}")
 
-    @staticmethod
-    def _is_retryable(msg):
-        m = str(msg).lower()
-        return any(k in m for k in _RETRYABLE)
-
     def _call(self, method, path, body=None):
-        """调用 REST。网络抖动指数退避重试;HTTP >=400(AntAPIError)业务错误直接抛。"""
+        """调用 REST。网络抖动(status==0)与 5xx 服务端错误指数退避重试;
+        4xx 业务错误(参数/状态)立即抛。"""
         last = None
         for attempt in range(self.retries + 1):
             try:
                 return self._request(method, path, body)
             except AntAPIError as e:
                 last = e
-                # HTTP 层错误(有 status)是业务错误,不重试;status==0 是网络层
-                if e.status == 0 and attempt < self.retries and self._is_retryable(e.body):
+                # status==0 网络层 / status>=500 服务端瞬时错误 -> 重试
+                # 400<=status<500 确定性业务错误 -> 立即抛
+                transient = e.status == 0 or e.status >= 500
+                if transient and attempt < self.retries:
                     time.sleep(2 ** attempt)
                     continue
                 raise
@@ -109,7 +102,10 @@ class AntBrowserProvider(BrowserProvider):
             "coreId": kwargs.get("core_id", ""),
         }}
         result = self._call("POST", "/api/profiles", body)
-        return result["profileId"]
+        pid = result.get("profileId")
+        if not pid:
+            raise RuntimeError(f"Ant create profile 返回无 profileId: {result}")
+        return pid
 
     # 以下 6 个方法在 Task 3/4 逐个用 TDD 替换。
     # 此处先给非抽象占位,使 AntBrowserProvider 可实例化(BrowserProvider 是 ABC,
