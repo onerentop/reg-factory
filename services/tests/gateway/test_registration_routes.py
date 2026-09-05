@@ -102,6 +102,43 @@ def test_register_uses_proxy_id_without_exposing_password(client):
     assert "9.9.9.9:1080" in call["proxy"]
 
 
+def test_register_unknown_proxy_id_is_404(client):
+    """proxy_id 是合法 UUID 但代理池里查不到对应记录 → 404。"""
+    runtime = FakeRuntime()
+    app.state.task_manager = runtime
+
+    class _FakeResult:
+        def scalar_one_or_none(self):
+            return None
+
+    class _FakeSession:
+        async def execute(self, *_args, **_kwargs):
+            return _FakeResult()
+
+        async def commit(self):
+            return None
+
+    app.dependency_overrides[get_session] = lambda: _FakeSession()
+    try:
+        response = client.post(
+            "/register/outlook", json={"count": 1, "proxy_id": str(uuid.uuid4())}
+        )
+    finally:
+        app.dependency_overrides[get_session] = lambda: None
+
+    assert response.status_code == 404
+
+
+def test_register_invalid_proxy_id_is_422(client):
+    """proxy_id 不是合法 UUID → 422，且不查库直接拒绝。"""
+    runtime = FakeRuntime()
+    app.state.task_manager = runtime
+    response = client.post(
+        "/register/outlook", json={"count": 1, "proxy_id": "not-a-uuid"}
+    )
+    assert response.status_code == 422
+
+
 def test_register_top_level_mode_overrides_config_mode(client):
     """顶层 mode 覆盖 config.mode 的解析逻辑与代理无关，直接传显式代理串单独守住。"""
     runtime = FakeRuntime()
