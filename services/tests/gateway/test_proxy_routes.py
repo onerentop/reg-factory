@@ -108,6 +108,19 @@ def test_list_proxies_with_items(client):
     assert items[0]["has_password"] is False
 
 
+def test_list_proxies_hides_password_when_set(client):
+    """密码不能以明文出现在响应里，但 has_password 要如实反映它已设置。"""
+    entry = FakeProxyEntry(password="secret")
+    session = make_fake_session(scalars_all=[entry])
+    app.dependency_overrides[get_session] = _session_override(session)
+    resp = client.get("/proxy")
+    assert resp.status_code == 200
+    assert "secret" not in resp.text
+    item = resp.json()["data"][0]
+    assert "password" not in item
+    assert item["has_password"] is True
+
+
 def test_list_proxies_has_no_binding_fields(client):
     entry = FakeProxyEntry()
     session = make_fake_session(scalars_all=[entry])
