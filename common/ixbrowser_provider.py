@@ -33,6 +33,9 @@ class IXBrowserProvider(BrowserProvider):
         self.port = int(port or IXBROWSER_PORT)
         self.retries = retries
         self._client = None
+        # profile_id -> 已解析代理 dict。profile 一律建成直连以绕过 ixBrowser 服务端
+        # 代理检测(它用 socks5 探 http 代理必失败),真代理在 open 时用 --proxy-server 注入。
+        self._injected_proxy = {}
 
     # ---------------- client / 重试 ----------------
     def _get_client(self):
@@ -153,18 +156,11 @@ class IXBrowserProvider(BrowserProvider):
             profile.group_id = kwargs["group_id"]
         profile.fingerprint_config = self._build_fingerprint()
 
+        # profile 一律建成「直连」：即使有代理也不写进 profile，避免 ixBrowser open 时
+        # 服务端代理检测(实测它对 http 代理发 socks5 握手，必回 HostUnreachable)误杀可用代理。
+        # 真代理在 open_browser 用 Chrome --proxy-server 注入，账密由上层走 CDP Fetch 认证。
         proxy = Proxy()
-        parsed = self._parse_proxy(proxy_str)
-        if parsed:
-            proxy.change_to_custom_mode(
-                proxy_type=parsed["type"],
-                proxy_ip=parsed["host"],
-                proxy_port=str(parsed["port"]),
-                proxy_user=parsed.get("username"),
-                proxy_password=parsed.get("password"),
-            )
-        else:
-            proxy.change_to_custom_mode(proxy_type="direct")
+        proxy.change_to_custom_mode(proxy_type="direct")
         profile.proxy_config = proxy
 
         profile.set_preference_config({
@@ -175,20 +171,35 @@ class IXBrowserProvider(BrowserProvider):
 
         result = self._call("create_profile", profile)
         pid = result.get("profile_id") if isinstance(result, dict) else result
+        parsed = self._parse_proxy(proxy_str)
+        if parsed:
+            self._injected_proxy[str(pid)] = parsed
         print(f"  ixBrowser 窗口已创建: {name} (ID: {pid})")
         return pid
 
     def open_browser(self, profile_id):
+        # 有绑定代理则用 --proxy-server 注入(绕过 ixBrowser 代理检测)。http 代理的账密
+        # 靠上层 CDP Fetch.authRequired 提供；scheme 取解析类型(默认 http)。
+        parsed = self._injected_proxy.get(str(profile_id))
+        startup_args = None
+        if parsed:
+            scheme = "socks5" if parsed.get("type") == "socks5" else "http"
+            startup_args = [f"--proxy-server={scheme}://{parsed['host']}:{parsed['port']}"]
         result = self._call(
             "open_profile", int(profile_id),
             cookies_backup=False, load_profile_info_page=False,
+            startup_args=startup_args,
         )
         ws = (result.get("ws") or "").strip() if isinstance(result, dict) else ""
         http = (result.get("debugging_address") or "").strip() if isinstance(result, dict) else ""
         if not ws and http:
             # ixBrowser 只给 debug 地址时，用 http endpoint 让 Playwright 自动发现 ws
             ws = http if http.startswith("http") else f"http://{http}"
-        return {"ws": ws, "http": http}
+        out = {"ws": ws, "http": http}
+        if parsed and (parsed.get("username") or parsed.get("password")):
+            out["proxy_auth"] = {"username": parsed.get("username"),
+                                 "password": parsed.get("password")}
+        return out
 
     def close_browser(self, profile_id):
         try:
@@ -197,6 +208,7 @@ class IXBrowserProvider(BrowserProvider):
             pass
 
     def delete_browser(self, profile_id):
+        self._injected_proxy.pop(str(profile_id), None)
         try:
             self._call("delete_profile", int(profile_id))
             print(f"  窗口已删除: {profile_id}")

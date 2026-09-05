@@ -142,6 +142,63 @@ async def inject_stealth(context, page):
     print("  stealth injected")
 
 
+async def prime_injected_proxy_auth(context, page, username, password, verbose=True):
+    """ixBrowser 直连档 + --proxy-server 注入代理时，用一次 CDP Fetch 认证喂进代理账密，
+    随后立即 Fetch.disable 关闭拦截。
+
+    为什么 prime 完就关拦截：Fetch.enable 会暂停每个请求，全程开着会改变网络时序、
+    可能被 PerimeterX 行为分析识破(浏览器模式本就刻意不拦资源)。实测 Chrome 在
+    Fetch.disable 后仍缓存该代理账密，后续 https(含 signup.live.com)照常直连。
+    prime 用轻量 http 请求触发一次 407(比 https CONNECT 冷启动更稳)。
+    """
+    if not username and not password:
+        return False
+    cdp = await context.new_cdp_session(page)
+    await cdp.send("Fetch.enable", {"handleAuthRequests": True,
+                                    "patterns": [{"urlPattern": "*"}]})
+
+    authed = {"v": False}
+
+    def on_auth(ev):
+        authed["v"] = True
+        asyncio.create_task(cdp.send("Fetch.continueWithAuth", {
+            "requestId": ev["requestId"],
+            "authChallengeResponse": {"response": "ProvideCredentials",
+                                      "username": username, "password": password}}))
+
+    def on_paused(ev):
+        async def _cont():
+            try:
+                await cdp.send("Fetch.continueRequest", {"requestId": ev["requestId"]})
+            except Exception:
+                pass
+        asyncio.create_task(_cont())
+
+    cdp.on("Fetch.authRequired", on_auth)
+    cdp.on("Fetch.requestPaused", on_paused)
+
+    # prime:等某个 http 探针「完整加载成功」——加载成功=请求确实经代理带认证走通，
+    # 此时 Chrome 已缓存该代理账密。只凭 authRequired 触发就 disable 会把异步排队中的
+    # continueWithAuth 取消掉(页面随后 reset)，故必须等加载成功。
+    ok = False
+    for probe in ("http://httpbin.org/ip", "http://api.ipify.org", "http://ip-api.com/json"):
+        try:
+            await page.goto(probe, timeout=20000, wait_until="domcontentloaded")
+            ok = True
+            break
+        except Exception as e:
+            if verbose:
+                print(f"  proxy-auth prime 探针 {probe} 报错: {str(e)[:50]}")
+    await asyncio.sleep(0.5)
+    try:
+        await cdp.send("Fetch.disable")
+    except Exception:
+        pass
+    if verbose:
+        print(f"  proxy-auth primed ({'ok' if ok else 'FAILED'}, authReq={authed['v']})，Fetch 拦截已关")
+    return ok
+
+
 def create_browser_with_retry(bb, name, retries=3, proxy_str=None):
     """创建 ixBrowser 窗口，带配额满自动清理 / 网络错误重试"""
     import time
@@ -191,6 +248,12 @@ async def open_and_connect(name, p=None, proxy_str=None):
     browser = await p.chromium.connect_over_cdp(ws)
     context = browser.contexts[0]
     page = context.pages[0] if context.pages else await context.new_page()
+    # provider 用 --proxy-server 注入了带账密的代理时(如 ixBrowser 直连档绕检测)，
+    # 先喂一次代理认证再关拦截，否则页面 net::ERR_CONNECTION_RESET（407 未应答）。
+    proxy_auth = data.get("proxy_auth") if isinstance(data, dict) else None
+    if proxy_auth:
+        await prime_injected_proxy_auth(context, page,
+                                        proxy_auth.get("username"), proxy_auth.get("password"))
     # 强制英文界面：代理 IP 地区（如马来/法国）会让 OpenAI/x.ai 按 Accept-Language
     # 返回本地化 UI（马来语 'Teruskan'/'Selesaikan...'），导致按钮文本匹配失效。
     # stealth 只改 navigator.languages（页面内 JS），改不了 HTTP 请求头，故在此统一固定。

@@ -49,13 +49,46 @@ def test_create_browser_default_kernel_unforced_and_returns_id():
     assert profile.fingerprint_config.kernel_version is None
 
 
-def test_create_browser_with_proxy_sets_custom_mode():
+def test_create_browser_with_proxy_builds_direct_and_stores_injection():
+    # 新行为：有代理也把 profile 建成「直连」，绕过 ixBrowser open 时的服务端代理检测；
+    # 代理暂存 _injected_proxy，留到 open_browser 用 --proxy-server 注入。
+    p, fake = _provider_with_fake_client()
+    fake.create_profile.return_value = {"profile_id": 9}
+    pid = p.create_browser(name="t", proxy_str="u:p@1.2.3.4:8080")
+    profile = fake.create_profile.call_args[0][0]
+    assert profile.proxy_config.proxy_ip is None          # 直连，代理未写进 profile
+    assert p._injected_proxy[str(pid)]["host"] == "1.2.3.4"
+    assert p._injected_proxy[str(pid)]["port"] == "8080"
+
+
+def test_open_browser_injects_proxy_server_and_returns_auth():
     p, fake = _provider_with_fake_client()
     fake.create_profile.return_value = {"profile_id": 9}
     p.create_browser(name="t", proxy_str="u:p@1.2.3.4:8080")
-    profile = fake.create_profile.call_args[0][0]
-    assert profile.proxy_config.proxy_ip == "1.2.3.4"
-    assert profile.proxy_config.proxy_port == "8080"
+    fake.open_profile.return_value = {
+        "ws": "ws://127.0.0.1:5/devtools/browser/x", "debugging_address": "127.0.0.1:5",
+    }
+    data = p.open_browser(9)
+    kwargs = fake.open_profile.call_args.kwargs
+    assert kwargs["startup_args"] == ["--proxy-server=http://1.2.3.4:8080"]
+    assert data["proxy_auth"] == {"username": "u", "password": "p"}
+
+
+def test_open_browser_without_injection_has_no_proxy_auth():
+    p, fake = _provider_with_fake_client()
+    fake.open_profile.return_value = {"ws": "ws://x", "debugging_address": "127.0.0.1:5"}
+    data = p.open_browser(999)          # 无绑定代理
+    assert fake.open_profile.call_args.kwargs["startup_args"] is None
+    assert "proxy_auth" not in data
+
+
+def test_delete_browser_clears_injection():
+    p, fake = _provider_with_fake_client()
+    fake.create_profile.return_value = {"profile_id": 9}
+    p.create_browser(name="t", proxy_str="u:p@1.2.3.4:8080")
+    assert "9" in p._injected_proxy
+    p.delete_browser(9)
+    assert "9" not in p._injected_proxy
 
 
 def test_open_browser_maps_ws_and_http():

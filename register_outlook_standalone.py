@@ -2186,6 +2186,7 @@ async def _open_ixbrowser_page(bb, idx, proxy_str):
     try:
         cur_proxy = proxy_str
         ws = ""
+        proxy_auth = None
         for _proxy_attempt in range(3):
             ts = datetime.now().strftime("%m%d_%H%M%S")
             name = f"outlook_{ts}_{idx}"
@@ -2220,6 +2221,7 @@ async def _open_ixbrowser_page(bb, idx, proxy_str):
             try:
                 info = bb.open_browser(profile_id)
                 ws = info.get("ws", "")
+                proxy_auth = info.get("proxy_auth")
                 if not ws:
                     raise RuntimeError(f"{tag} no WebSocket URL")
                 break
@@ -2246,6 +2248,13 @@ async def _open_ixbrowser_page(bb, idx, proxy_str):
             browser = await p.chromium.connect_over_cdp(ws)
             context = browser.contexts[0] if browser.contexts else await browser.new_context()
             page = await context.new_page()
+
+            # ixBrowser 直连档 + --proxy-server 注入代理时，先用 CDP 喂一次代理账密再关拦截，
+            # 否则首个 https 导航 net::ERR_CONNECTION_RESET(代理 407 未应答)。
+            if proxy_auth:
+                from common.browser import prime_injected_proxy_auth
+                await prime_injected_proxy_auth(context, page,
+                                                proxy_auth.get("username"), proxy_auth.get("password"))
 
             # 渲染视口对齐由 donut 内核侧修复(wayfern_manager 加
             # --force-device-scale-factor=1 + 窗口夹紧到物理可用区)，此处不再 override，
