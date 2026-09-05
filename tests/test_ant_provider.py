@@ -165,3 +165,12 @@ def test_cleanup_browsers_deletes_beyond_keep():
     ] + [{"ok": True}] * 10
     n = p.cleanup_browsers(keep=1)
     assert n == 2   # 保留 1 个,删 2 个
+
+
+def test_factory_returns_ant_when_configured(monkeypatch):
+    import common.browser_provider as bp
+    monkeypatch.setattr("config.BROWSER_PROVIDER", "ant", raising=False)
+    bp._PROVIDER = None            # 重置单例
+    p = bp.get_browser_provider()
+    assert isinstance(p, AntBrowserProvider)
+    bp._PROVIDER = None            # 清理,免污染其它测试

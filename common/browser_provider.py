@@ -46,11 +46,14 @@ _PROVIDER = None
 
 
 def get_browser_provider():
-    """返回全局单例 provider。默认 ixBrowser，可用 BROWSER_PROVIDER=donut 切换。"""
+    """返回全局单例 provider。默认 ant，可用 BROWSER_PROVIDER=ixbrowser/donut 切换。"""
     global _PROVIDER
     if _PROVIDER is None:
         from config import BROWSER_PROVIDER
-        if BROWSER_PROVIDER == "donut":
+        if BROWSER_PROVIDER == "ant":
+            from common.ant_provider import AntBrowserProvider
+            _PROVIDER = AntBrowserProvider()
+        elif BROWSER_PROVIDER == "donut":
             from common.donut_provider import DonutBrowserProvider
             _PROVIDER = DonutBrowserProvider()
         else:
