@@ -521,7 +521,7 @@ export default function AccountsPage() {
               <Select
                 style={{ width: '100%' }}
                 value={selectedProxyId}
-                onChange={(v) => { setSelectedProxyId(v); if (v) setRegisterCount(1) }}
+                onChange={(v) => setSelectedProxyId(v)}
                 options={[
                   { value: '', label: '🎲 自动选择（从今日未用的已激活代理中分配）' },
                   ...proxyList.map(p => ({

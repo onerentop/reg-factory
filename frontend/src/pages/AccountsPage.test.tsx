@@ -119,12 +119,15 @@ describe('手动选代理不再锁定数量', () => {
     renderAccountsPage()
     fireEvent.click(await screen.findByRole('button', { name: /新建注册/ }))
 
+    const countInput = screen.getByRole('spinbutton')
+    fireEvent.change(countInput, { target: { value: '5' } })
+    expect(countInput).toHaveValue('5')
+
     fireEvent.mouseDown(await screen.findByText(/自动选择/))
     fireEvent.click(await screen.findByText(/1\.2\.3\.4:8080/))
 
-    const countInput = screen.getByRole('spinbutton')
     expect(countInput).not.toBeDisabled()
-    fireEvent.change(countInput, { target: { value: '5' } })
+    expect(countInput).toHaveValue('5')
 
     fireEvent.click(screen.getByRole('button', { name: /开始注册/ }))
 
