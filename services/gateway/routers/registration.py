@@ -44,6 +44,7 @@ async def _resolve_proxy(session: AsyncSession, proxy_id: str | None, proxy: str
         if selected is None:
             raise HTTPException(status_code=404, detail="Proxy not found")
         return _proxy_url(selected)
+    # session=None 仅出现在测试路径（生产 get_session 不会返回 None）
     return proxy or (await _pick_active_proxy(session) if session is not None else "")
 
 

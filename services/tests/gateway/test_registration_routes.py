@@ -28,6 +28,31 @@ class FakeRuntime:
         self.submissions.append((task_id, kwargs))
 
 
+def _fake_session(*, one=None, many=None):
+    """构造一个假 AsyncSession：execute() 结果同时支持
+    scalar_one_or_none()（proxy_id 精确查找）和 scalars().all()（代理池随机选取）。"""
+
+    class _FakeScalars:
+        def all(self):
+            return many or []
+
+    class _FakeResult:
+        def scalar_one_or_none(self):
+            return one
+
+        def scalars(self):
+            return _FakeScalars()
+
+    class _FakeSession:
+        async def execute(self, *_args, **_kwargs):
+            return _FakeResult()
+
+        async def commit(self):
+            return None
+
+    return _FakeSession()
+
+
 def test_register_outlook_queues_local_task(client):
     runtime = FakeRuntime()
     app.state.task_manager = runtime
@@ -78,18 +103,7 @@ def test_register_uses_proxy_id_without_exposing_password(client):
         username="u", password=password, status="active",
     )
 
-    class _FakeResult:
-        def scalar_one_or_none(self):
-            return entry
-
-    class _FakeSession:
-        async def execute(self, *_args, **_kwargs):
-            return _FakeResult()
-
-        async def commit(self):
-            return None
-
-    app.dependency_overrides[get_session] = lambda: _FakeSession()
+    app.dependency_overrides[get_session] = lambda: _fake_session(one=entry)
     try:
         response = client.post("/register/outlook", json={"count": 1, "proxy_id": proxy_id})
     finally:
@@ -107,18 +121,7 @@ def test_register_unknown_proxy_id_is_404(client):
     runtime = FakeRuntime()
     app.state.task_manager = runtime
 
-    class _FakeResult:
-        def scalar_one_or_none(self):
-            return None
-
-    class _FakeSession:
-        async def execute(self, *_args, **_kwargs):
-            return _FakeResult()
-
-        async def commit(self):
-            return None
-
-    app.dependency_overrides[get_session] = lambda: _FakeSession()
+    app.dependency_overrides[get_session] = lambda: _fake_session(one=None)
     try:
         response = client.post(
             "/register/outlook", json={"count": 1, "proxy_id": str(uuid.uuid4())}
@@ -137,6 +140,33 @@ def test_register_invalid_proxy_id_is_422(client):
         "/register/outlook", json={"count": 1, "proxy_id": "not-a-uuid"}
     )
     assert response.status_code == 422
+
+
+def test_register_falls_back_to_pool_and_shares_base_proxy_across_batch(client):
+    """无 proxy/proxy_id 时从代理池随机选取；同一批任务共享同一基础代理，
+    只在每个窗口上轮换 sid，而不是每个任务各自重新选池。"""
+    import re
+    from gateway.models import ProxyEntry
+
+    runtime = FakeRuntime()
+    app.state.task_manager = runtime
+    entry = ProxyEntry(
+        type="socks5", username="sb7f3017-region-Rand-sid-ORIG1234-t-5", password="pw",
+        host="us.1024proxy.io", port=3000, status="active",
+    )
+
+    app.dependency_overrides[get_session] = lambda: _fake_session(many=[entry])
+    try:
+        response = client.post("/register/outlook", json={"count": 2})
+    finally:
+        app.dependency_overrides[get_session] = lambda: None
+
+    assert response.status_code == 200
+    used = [call[1]["proxy"] for call in runtime.submissions]
+    assert len(used) == 2
+    assert all("us.1024proxy.io:3000" in p for p in used)
+    sids = [re.search(r"-sid-([A-Za-z0-9]+)-t-", p).group(1) for p in used]
+    assert sids[0] != sids[1]
 
 
 def test_register_top_level_mode_overrides_config_mode(client):
