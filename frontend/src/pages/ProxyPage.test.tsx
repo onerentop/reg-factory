@@ -42,29 +42,15 @@ function stubFetch(rows: any[]) {
   }))
 }
 
-describe('绑定展示', () => {
-  it('渲染今日与累计绑定列', async () => {
-    stubFetch([{ id: 'p1', type: 'http', host: '1.2.3.4', port: 8080, status: 'active',
-                 today_bound: 1, total_bound: 7,
-                 today_profile_name: 'a@gmail.com', available_today: false }])
-    renderWithProviders(<ProxyPage />)
-    await waitFor(() => expect(screen.getByText('今日 1/1')).toBeInTheDocument())
-    expect(screen.getByText('累计 7')).toBeInTheDocument()
-  })
-
-  it('未绑定过的代理显示今日 0/1', async () => {
-    stubFetch([{ id: 'p1', type: 'http', host: '1.2.3.4', port: 8080, status: 'active',
-                 today_bound: 0, total_bound: 0,
-                 today_profile_name: null, available_today: true }])
-    renderWithProviders(<ProxyPage />)
-    await waitFor(() => expect(screen.getByText('今日 0/1')).toBeInTheDocument())
-  })
-
-  it('后端未返回绑定字段时不崩溃', async () => {
+describe('绑定/配额 UI 移除', () => {
+  it('不再渲染绑定/配额列', async () => {
     stubFetch([{ id: 'p1', type: 'http', host: '1.2.3.4', port: 8080, status: 'active' }])
     renderWithProviders(<ProxyPage />)
-    await waitFor(() => expect(screen.getByText('今日 0/1')).toBeInTheDocument())
-    expect(screen.getByText('累计 0')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByText('1.2.3.4')).toBeInTheDocument()
+    })
+    expect(screen.queryByText(/今日 \/ 累计/)).toBeNull()
+    expect(screen.queryByText(/今日可用/)).toBeNull()
   })
 })
 

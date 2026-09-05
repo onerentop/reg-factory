@@ -13,10 +13,6 @@ interface Proxy {
   active: boolean
   region?: string
   ip?: string
-  today_bound?: number
-  total_bound?: number
-  today_profile_name?: string | null
-  available_today?: boolean
 }
 
 export default function ProxyPage() {
@@ -29,7 +25,6 @@ export default function ProxyPage() {
   const [importVisible, setImportVisible] = useState(false)
   const [importText, setImportText] = useState('')
   const [importType, setImportType] = useState('http')
-  const [bindings, setBindings] = useState<Record<string, any[]>>({})
   const [form] = Form.useForm()
   const [editForm] = Form.useForm()
 
@@ -99,14 +94,6 @@ export default function ProxyPage() {
       setImportText('')
       fetchProxies()
     } catch { message.error('导入失败') }
-  }
-
-  const loadBindings = async (id: string) => {
-    try {
-      const resp = await fetch(`/api/proxy/${id}/bindings`)
-      const data = await parseResponse(resp)
-      setBindings(prev => ({ ...prev, [id]: data.data || [] }))
-    } catch { setBindings(prev => ({ ...prev, [id]: [] })) }
   }
 
   const removeProxy = async (id: string) => {
@@ -239,19 +226,6 @@ export default function ProxyPage() {
         return <span style={{ color: 'var(--text-secondary)' }}>未检测</span>
       },
     },
-    {
-      title: '今日 / 累计', key: 'binding', width: 150,
-      render: (_: any, record: Proxy) => (
-        <Space size={4}>
-          <Tag color={record.today_bound ? 'red' : 'green'}>
-            今日 {record.today_bound ?? 0}/1
-          </Tag>
-          <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>
-            累计 {record.total_bound ?? 0}
-          </span>
-        </Space>
-      ),
-    },
     { title: '状态', dataIndex: 'status', key: 'status', width: 90, render: statusTag },
     {
       title: '激活', key: 'active', width: 60,
@@ -300,7 +274,6 @@ export default function ProxyPage() {
         <Space>
           <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>
             已激活 {proxies.filter(p => p.active !== false).length} / {proxies.length}
-            ｜今日可用 {proxies.filter(p => p.available_today !== false).length} / {proxies.length}
           </span>
           <Input
             prefix={<SearchOutlined />}
@@ -328,27 +301,6 @@ export default function ProxyPage() {
         rowSelection={{
           selectedRowKeys,
           onChange: (keys) => setSelectedRowKeys(keys as string[]),
-        }}
-        expandable={{
-          onExpand: (expanded, record) => { if (expanded) loadBindings(record.id) },
-          expandedRowRender: (record: Proxy) => (
-            <Table
-              rowKey={(r: any) => `${r.bound_date}-${r.profile_id}`}
-              size="small"
-              pagination={false}
-              locale={{ emptyText: '暂无绑定记录' }}
-              dataSource={bindings[record.id] || []}
-              columns={[
-                { title: '日期', dataIndex: 'bound_date', key: 'bound_date' },
-                { title: '窗口 ID', dataIndex: 'profile_id', key: 'profile_id',
-                  render: (v: string) => v || '-' },
-                { title: '窗口名 / 邮箱', dataIndex: 'profile_name', key: 'profile_name',
-                  render: (v: string) => v || '-' },
-                { title: '平台', dataIndex: 'platform', key: 'platform' },
-                { title: '结果', dataIndex: 'status', key: 'status' },
-              ]}
-            />
-          ),
         }}
         size="middle"
       />
