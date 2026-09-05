@@ -111,7 +111,19 @@ class AntBrowserProvider(BrowserProvider):
     # 此处先给非抽象占位,使 AntBrowserProvider 可实例化(BrowserProvider 是 ABC,
     # 7 个抽象方法必须全部有具体实现才能实例化)。
     def open_browser(self, profile_id):
-        raise NotImplementedError
+        r = self._call("POST", "/api/launch", {"profileId": profile_id})
+        debug_port = r.get("debugPort")
+        if r.get("debugReady") and debug_port:
+            ep = f"http://127.0.0.1:{debug_port}"
+            return {"ws": ep, "http": ep}
+        # 兜底:短轮询 runtime/active(实测通常 launch 即就绪,此为极端兜底)
+        for _ in range(15):
+            rt = self._call("GET", "/api/runtime/active")
+            if rt.get("profileId") == profile_id and rt.get("debugReady") and rt.get("debugPort"):
+                ep = f"http://127.0.0.1:{rt['debugPort']}"
+                return {"ws": ep, "http": ep}
+            time.sleep(1)
+        raise AntAPIError(0, "GET", "/api/runtime/active", "debug not ready")
 
     def close_browser(self, profile_id):
         raise NotImplementedError

@@ -84,3 +84,32 @@ def test_call_retries_on_5xx():
         with pytest.raises(AntAPIError):
             p._call("GET", "/api/health")
     assert u.call_count == 3   # 5xx 重试
+
+
+def test_open_browser_returns_http_endpoint_from_debugport():
+    p, call = _provider_with_fake_call()
+    call.return_value = {"debugPort": 46602, "debugReady": True, "ok": True}
+    data = p.open_browser("uuid-1")
+    assert data == {"ws": "http://127.0.0.1:46602", "http": "http://127.0.0.1:46602"}
+    method, path, body = call.call_args[0]
+    assert method == "POST" and path == "/api/launch"
+    assert body == {"profileId": "uuid-1"}
+
+
+def test_open_browser_polls_when_launch_not_ready():
+    p, call = _provider_with_fake_call()
+    # 第一次 launch 未就绪,随后 runtime/active 就绪
+    call.side_effect = [
+        {"debugReady": False, "debugPort": 0},                        # launch
+        {"profileId": "uuid-1", "debugReady": True, "debugPort": 55000},  # runtime/active
+    ]
+    data = p.open_browser("uuid-1")
+    assert data["http"] == "http://127.0.0.1:55000"
+
+
+def test_open_browser_raises_when_never_ready():
+    p, call = _provider_with_fake_call()
+    call.return_value = {"debugReady": False, "debugPort": 0}
+    with patch("common.ant_provider.time.sleep"):      # 免真 sleep 15s
+        with pytest.raises(AntAPIError):
+            p.open_browser("uuid-1")
