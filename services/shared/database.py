@@ -42,10 +42,8 @@ class DatabaseManager:
                 def configure_sqlite_connection(dbapi_connection, _connection_record):
                     # 关掉驱动的隐式 BEGIN，改由下面的 "begin" 事件显式发。缺了这一步，
                     # 连接始终处于 autocommit：SAVEPOINT 一 RELEASE 就落盘，外层
-                    # session.rollback() 无事可撤。实测症状——ProxyBindingService.claim()
-                    # 在 begin_nested() 里插的 binding，回滚后仍留在库里，
-                    # 于是 gateway 注册流程中途抛异常时会漏出无主 binding，
-                    # 启动扫描按 Job 反查扫不到它，那个 IP 白白锁到本地零点。
+                    # session.rollback() 无事可撤——begin_nested() 里的写入会在回滚后
+                    # 仍然留在库里，导致 SQLite 显式事务控制形同虚设。
                     # 别把这行「简化」掉，它和下面的 sqlite_explicit_begin 是一对。
                     dbapi_connection.isolation_level = None
                     cursor = dbapi_connection.cursor()

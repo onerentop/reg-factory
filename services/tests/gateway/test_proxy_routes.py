@@ -12,6 +12,9 @@ from fastapi.testclient import TestClient
 from gateway.deps import get_session
 from gateway.main import app
 
+# 原值曾从已下线的绑定服务模块导入；内联保留，避免测试依赖已删除的模块。
+ACTIVE_STATUSES = ("active", "available", "slow")
+
 
 # ──────────────────────────────────────────────
 # FakeProxyEntry
@@ -356,7 +359,6 @@ def test_imported_proxies_are_active_and_claimable(client):
     session, added = _import_session()
     app.dependency_overrides[get_session] = _session_override(session)
     client.post("/proxy/import", json={"text": "1.2.3.4:8080:u:p", "type": "http"})
-    from gateway.proxy_binding_service import ACTIVE_STATUSES
     assert added[0].status in ACTIVE_STATUSES
 
 

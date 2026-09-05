@@ -43,9 +43,8 @@ async def _count(manager: DatabaseManager) -> int:
 async def test_rollback_undoes_savepoint_write(db):
     """begin_nested() 里的写入，必须能被外层 rollback() 撤销。
 
-    回归的症状：ProxyBindingService.claim() 在 SAVEPOINT 里插的 binding
-    在回滚后依然留在库里，于是注册流程中途失败会漏出无主 binding，
-    该代理当天的额度直到本地零点都收不回来。
+    回归的症状：某次业务写入在 SAVEPOINT 里插入的记录，回滚后依然留在库里，
+    导致中途失败的写入流程漏出了本该被撤销的孤儿数据。
     """
     assert db._session_factory is not None
     async with db._session_factory() as session:
