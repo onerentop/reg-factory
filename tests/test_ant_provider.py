@@ -115,6 +115,15 @@ def test_open_browser_raises_when_never_ready():
             p.open_browser("uuid-1")
 
 
+def test_open_browser_launch_uses_longer_timeout():
+    p, call = _provider_with_fake_call()
+    call.return_value = {"debugPort": 46602, "debugReady": True}
+    p.open_browser("uuid-1")
+    # launch 那次 _call 带 timeout=90 kwarg
+    launch_call = call.call_args_list[0]
+    assert launch_call.kwargs.get("timeout") == 90
+
+
 def test_close_browser_stops_with_profile_selector():
     p, call = _provider_with_fake_call()
     call.return_value = {"ok": True}
@@ -135,8 +144,7 @@ def test_delete_browser_stops_then_deletes():
     call.return_value = {"ok": True}
     p.delete_browser("uuid-1")
     paths = [c[0][1] for c in call.call_args_list]
-    assert "/api/runtime/stop" in paths
-    assert "/api/profiles/uuid-1" in paths
+    assert paths == ["/api/runtime/stop", "/api/profiles/uuid-1"]   # 顺序: 先停再删
 
 
 def test_delete_browser_swallows_errors():
@@ -153,18 +161,32 @@ def test_list_browsers_maps_fields():
     ]}
     out = p.list_browsers()
     rows = out["data"]["list"]
-    assert rows[0] == {"id": "a", "name": "n1", "remark": "d1", "seq": "a"}
+    assert rows[0] == {"id": "a", "name": "n1", "remark": "", "seq": "a"}
     assert len(rows) == 2
 
 
 def test_cleanup_browsers_deletes_beyond_keep():
     p, call = _provider_with_fake_call()
-    # 第一次 _call 是 GET /api/profiles(列表),之后是 stop/delete(吞异常)
+    # 第一次 _call 是 GET /api/profiles(列表),之后 cleanup 内联 stop+delete(不再走 delete_browser)
     call.side_effect = [
         {"items": [{"profileId": "a"}, {"profileId": "b"}, {"profileId": "c"}]},
     ] + [{"ok": True}] * 10
     n = p.cleanup_browsers(keep=1)
     assert n == 2   # 保留 1 个,删 2 个
+
+
+def test_cleanup_browsers_counts_only_successful_deletes():
+    p, call = _provider_with_fake_call()
+    # list(3项) -> b 的 stop ok, b 的 delete 失败; c 的 stop ok, c 的 delete ok
+    call.side_effect = [
+        {"items": [{"profileId": "a"}, {"profileId": "b"}, {"profileId": "c"}]},
+        {"ok": True},                                             # stop b
+        AntAPIError(409, "DELETE", "/api/profiles/b", "running"), # delete b 失败
+        {"ok": True},                                             # stop c
+        {"ok": True},                                             # delete c
+    ]
+    n = p.cleanup_browsers(keep=1)
+    assert n == 1   # 只有 c 删成功
 
 
 def test_factory_returns_ant_when_configured(monkeypatch):

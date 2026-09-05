@@ -53,7 +53,7 @@ class AntBrowserProvider(BrowserProvider):
         self.retries = retries
 
     # ---------------- HTTP ----------------
-    def _request(self, method, path, body=None):
+    def _request(self, method, path, body=None, timeout=None):
         url = self.base + path
         data = json.dumps(body).encode("utf-8") if body is not None else None
         req = urllib.request.Request(url, data=data, method=method)
@@ -61,7 +61,7 @@ class AntBrowserProvider(BrowserProvider):
         if self.api_key:
             req.add_header("X-Ant-Api-Key", self.api_key)
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
+            with urllib.request.urlopen(req, timeout=timeout or self.timeout) as resp:
                 raw = resp.read()
                 if not raw:
                     return {}
@@ -75,13 +75,13 @@ class AntBrowserProvider(BrowserProvider):
         except urllib.error.URLError as e:
             raise AntAPIError(0, method, path, f"URLError: {e}")
 
-    def _call(self, method, path, body=None):
+    def _call(self, method, path, body=None, timeout=None):
         """调用 REST。网络抖动(status==0)与 5xx 服务端错误指数退避重试;
-        4xx 业务错误(参数/状态)立即抛。"""
+        4xx 业务错误(参数/状态)立即抛。timeout 可覆盖默认值(如 launch 用更长)。"""
         last = None
         for attempt in range(self.retries + 1):
             try:
-                return self._request(method, path, body)
+                return self._request(method, path, body, timeout=timeout)
             except AntAPIError as e:
                 last = e
                 # status==0 网络层 / status>=500 服务端瞬时错误 -> 重试
@@ -111,7 +111,7 @@ class AntBrowserProvider(BrowserProvider):
     # 此处先给非抽象占位,使 AntBrowserProvider 可实例化(BrowserProvider 是 ABC,
     # 7 个抽象方法必须全部有具体实现才能实例化)。
     def open_browser(self, profile_id):
-        r = self._call("POST", "/api/launch", {"profileId": profile_id})
+        r = self._call("POST", "/api/launch", {"profileId": profile_id}, timeout=90)
         debug_port = r.get("debugPort")
         if r.get("debugReady") and debug_port:
             ep = f"http://127.0.0.1:{debug_port}"
@@ -132,7 +132,8 @@ class AntBrowserProvider(BrowserProvider):
             pass
 
     def delete_browser(self, profile_id):
-        # delete 对运行中实例返回 409,必须先 stop
+        # delete 对运行中实例返回 409,必须先 stop。teardown 里可能已 close(stop)过,
+        # 这里再 stop 一次是幂等的,成本可忽略,勿删。
         try:
             self._call("POST", "/api/runtime/stop", {"profileId": profile_id})
         except Exception:
@@ -149,7 +150,7 @@ class AntBrowserProvider(BrowserProvider):
         rows = [{
             "id": p.get("profileId"),
             "name": p.get("profileName", ""),
-            "remark": p.get("userDataDir", ""),
+            "remark": "",
             "seq": p.get("profileId", ""),
         } for p in self._fetch_all_profiles()]
         return {"data": {"list": rows}}
@@ -157,9 +158,24 @@ class AntBrowserProvider(BrowserProvider):
     def cleanup_browsers(self, keep=0):
         rows = self._fetch_all_profiles()
         to_delete = rows[keep:]
+        if not to_delete:
+            print("  无实例需要清理")
+            return 0
+        deleted = 0
         for p in to_delete:
-            self.delete_browser(p.get("profileId"))
-        return len(to_delete)
+            pid = p.get("profileId")
+            # 先停(运行中删返回 409),再删;两步分别吞异常,delete 成功才计数
+            try:
+                self._call("POST", "/api/runtime/stop", {"profileId": pid})
+            except Exception:
+                pass
+            try:
+                self._call("DELETE", f"/api/profiles/{pid}", None)
+                deleted += 1
+            except Exception as e:
+                print(f"  删除失败 {p.get('profileName', '')}: {e}")
+        print(f"  清理完成: 删除 {deleted}/{len(to_delete)} 个实例")
+        return deleted
 
     def select_browser(self):
         rows = self._fetch_all_profiles()
