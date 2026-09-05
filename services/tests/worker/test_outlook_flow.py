@@ -36,7 +36,7 @@ def test_mode_protocol_dispatches(monkeypatch):
 
 def test_default_mode_is_browser(monkeypatch):
     called = {}
-    async def fake_browser(bb, idx, proxy_str, on_window=None):
+    async def fake_browser(bb, idx, proxy_str):
         called["mode"] = "browser"; return ("b@outlook.com", "Pw!", None)
     monkeypatch.setitem(sys.modules, "register_outlook_standalone",
                         _fake_module("register_outlook_standalone", _register_one_browser=fake_browser))

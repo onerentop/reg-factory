@@ -523,13 +523,10 @@ export default function AccountsPage() {
                 value={selectedProxyId}
                 onChange={(v) => setSelectedProxyId(v)}
                 options={[
-                  { value: '', label: '🎲 自动选择（从今日未用的已激活代理中分配）' },
+                  { value: '', label: '🎲 自动选择（从已激活代理中随机分配）' },
                   ...proxyList.map(p => ({
                     value: p.id,
-                    label: p.available_today === false
-                      ? `${p.host}:${p.port} — ${p.username?.match(/region-(\w+)/)?.[1] || p.type}（今日已用）`
-                      : `${p.host}:${p.port} — ${p.username?.match(/region-(\w+)/)?.[1] || p.type}`,
-                    disabled: p.available_today === false,
+                    label: `${p.host}:${p.port} — ${p.username?.match(/region-(\w+)/)?.[1] || p.type}`,
                   })),
                 ]}
               />
