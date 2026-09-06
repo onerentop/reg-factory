@@ -95,10 +95,13 @@ ALLOCATOR_MAP: dict[str, type[ProxyAllocator]] = {
 
 async def check_proxy_health(host: str, port: int, proxy_type: str = "socks5", timeout: float = 10.0, username: str = None, password: str = None) -> str:
     """检测单个代理的健康状态。返回 available / slow / unavailable。"""
+    # socks5 走远端 DNS(socks5h)：1024proxy 等住宅代理要求在出口解析域名，
+    # 用 socks5(本地 DNS)会 SSL EOF / 连不上，socks5h 才通。
+    scheme = "socks5h" if proxy_type == "socks5" else proxy_type
     if username and password:
-        proxy_url = f"{proxy_type}://{username}:{password}@{host}:{port}"
+        proxy_url = f"{scheme}://{username}:{password}@{host}:{port}"
     else:
-        proxy_url = f"{proxy_type}://{host}:{port}"
+        proxy_url = f"{scheme}://{host}:{port}"
     test_urls = ["https://www.google.com/generate_204", "https://cp.cloudflare.com", "https://httpbin.org/ip"]
     try:
         async with httpx.AsyncClient(proxy=proxy_url, timeout=timeout, follow_redirects=True) as client:
@@ -117,10 +120,12 @@ async def check_proxy_health(host: str, port: int, proxy_type: str = "socks5", t
 
 async def detect_proxy_ip(host: str, port: int, proxy_type: str = "socks5", timeout: float = 10.0, username: str = None, password: str = None) -> dict:
     """检测代理出口 IP 和地区。"""
+    # 同 check_proxy_health：socks5 用 socks5h(远端 DNS),否则住宅代理连不上。
+    scheme = "socks5h" if proxy_type == "socks5" else proxy_type
     if username and password:
-        proxy_url = f"{proxy_type}://{username}:{password}@{host}:{port}"
+        proxy_url = f"{scheme}://{username}:{password}@{host}:{port}"
     else:
-        proxy_url = f"{proxy_type}://{host}:{port}"
+        proxy_url = f"{scheme}://{host}:{port}"
     try:
         async with httpx.AsyncClient(proxy=proxy_url, timeout=timeout) as client:
             resp = await client.get("http://ip-api.com/json/?fields=query,country,countryCode,regionName,city")

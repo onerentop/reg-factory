@@ -77,13 +77,17 @@ async def test_proxy(proxy_id: str, session: AsyncSession = Depends(get_session)
         raise HTTPException(status_code=404, detail="Proxy not found")
 
     from gateway.proxy_manager import check_proxy_health, detect_proxy_ip
+    from worker.tasks._helpers import rotate_proxy_sid  # 自举根路径后引 common.proxy
     ptype = proxy.type or "socks5"
+    # 1024proxy 等住宅代理的 sid 会失效:检测前轮换出新 sid(与实际注册每窗轮换一致),
+    # 否则会用存库那个可能已失效的 sid 得到假 unavailable。非 sid 格式原样返回。
+    test_user = rotate_proxy_sid(proxy.username) if proxy.username else proxy.username
     result = await check_proxy_health(proxy.host, int(proxy.port), ptype,
-                                       username=proxy.username, password=proxy.password)
+                                       username=test_user, password=proxy.password)
     ip_info = {"ip": "", "region": ""}
     if result in ("available", "slow"):
         ip_info = await detect_proxy_ip(proxy.host, int(proxy.port), ptype,
-                                         username=proxy.username, password=proxy.password)
+                                         username=test_user, password=proxy.password)
     return ApiResponse(data={"id": str(proxy.id), "result": result, **ip_info})
 
 
